@@ -1,13 +1,22 @@
-// Contas, Google Calendar e Anthropic FALSOS, com dados fictícios, para ver o agenda-web no notebook
-// (node teste/local.ts sobe este e o agenda-web juntos). Nada aqui fala com serviço de verdade.
+// Login do Google (OAuth), Google Calendar e Anthropic FALSOS, com dados fictícios, para ver a IAgenda no computador
+// (node teste/local.ts sobe este e a IAgenda juntos). Nada aqui fala com serviço de verdade.
 import { createServer } from "node:http";
+import { createHash, randomBytes } from "node:crypto";
 
-const SEGREDO = "x".repeat(40);
-const JWT = "aaa.bbb.ccc";
-const JWT2 = "ddd.eee.fff";   // outra pessoa, sem convite (409 convite)
-let codigos = new Set(["codigo-de-teste-1234567890", "codigo-de-teste-abcdefghij"]);
+export const CLIENT_ID = "iagenda-teste.apps.googleusercontent.com";
+export const CLIENT_SECRET = "segredo-de-teste";
+const ESCOPO_AGENDA = "https://www.googleapis.com/auth/calendar.events";
+// Pessoas que dá para escolher na tela de login falsa. Só a Fulana está em AGENDA_CONVITES (teste/local.ts).
+const PESSOAS: Record<string, { sub: string; email: string; nome: string }> = {
+  fulana: { sub: "100000000000000000001", email: "fulana@gmail.com", nome: "Fulana Teste" },
+  beltrano: { sub: "100000000000000000002", email: "beltrano@gmail.com", nome: "Beltrano Sem Convite" },
+};
+const codigos = new Map<string, { pessoa: string; desafio: string; redirect: string; escopo: string; consentiu: boolean }>();
+const jaConsentiram = new Set<string>();   // como o Google: refresh token só no primeiro consentimento (ou com prompt=consent)
 let acessoPedidos = 0;
 let reconectar = false; // (reinicia limpo)
+const b64u = (o: unknown) => Buffer.from(JSON.stringify(o)).toString("base64url");
+const esc = (t: string) => t.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 type Ev = any;
 const evs = new Map<string, Ev>();
@@ -106,7 +115,7 @@ createServer(async (req, res) => {
   const p = url.pathname;
   let corpo = "";
   for await (const c of req) corpo += c;
-  const b = corpo ? JSON.parse(corpo) : {};
+  const b = !corpo ? {} : String(req.headers["content-type"] ?? "").includes("json") ? JSON.parse(corpo) : Object.fromEntries(new URLSearchParams(corpo));
   const auth = req.headers.authorization ?? "";
   const j = (s: number, o?: unknown) => { res.writeHead(s, { "Content-Type": "application/json" }); res.end(o === undefined ? "" : JSON.stringify(o)); };
   log.push(`${req.method} ${p}`);
@@ -191,28 +200,68 @@ createServer(async (req, res) => {
     return resp([{ type: "text", text: "Oi! Em que posso ajudar na sua agenda?" }], "end_turn");
   }
 
-  // ----- Contas -----
+  // ----- controle do teste -----
   if (p === "/teste/ia") return j(200, pedidosIA);
   if (p === "/teste/log") return j(200, { log, acessoPedidos, evs: [...evs.values()], excecoes: [...excecoes.entries()] });
   if (p === "/teste/reconectar") { reconectar = true; return j(200, {}); }
-  if (p === "/api/auth/google/sessao" && req.method === "POST") {
-    if (!codigos.has(b.codigo)) return j(401, { message: "Código vencido." });
-    codigos.delete(b.codigo);
-    return j(200, { token: b.codigo.endsWith("abcdefghij") ? JWT2 : JWT, user: { id: "1", name: "Fulana Teste", email: "fulana@gmail.com", isAdmin: false } });
+
+  // ----- Login do Google (OAuth 2.0 + PKCE) -----
+  // Tela de escolha: no lugar da tela do Google, botões para cada caso de teste.
+  if (p === "/o/oauth2/v2/auth" && req.method === "GET") {
+    const q = url.searchParams;
+    const volta = (extra: Record<string, string>) => `${q.get("redirect_uri")}?${new URLSearchParams({ ...extra, state: q.get("state") ?? "" })}`;
+    if (q.get("client_id") !== CLIENT_ID || q.get("code_challenge_method") !== "S256" || !q.get("code_challenge")) {
+      res.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" }); return res.end("Pedido de login inválido (client_id ou PKCE).");
+    }
+    const escolha = q.get("escolha");
+    if (escolha) {
+      if (escolha === "cancelar") { res.writeHead(302, { Location: volta({ error: "access_denied" }) }); return res.end(); }
+      const [pessoa, semAgenda] = escolha.split(":");
+      if (!PESSOAS[pessoa]) { res.writeHead(400); return res.end(); }
+      const code = "4/" + randomBytes(16).toString("hex");
+      const escopo = (q.get("scope") ?? "").split(" ").filter((e) => !(semAgenda && e === ESCOPO_AGENDA)).join(" ");
+      codigos.set(code, { pessoa, desafio: q.get("code_challenge")!, redirect: q.get("redirect_uri")!, escopo, consentiu: /consent/.test(q.get("prompt") ?? "") });
+      res.writeHead(302, { Location: volta({ code, scope: escopo }) }); return res.end();
+    }
+    const link = (escolha: string, texto: string) => {
+      const u = new URLSearchParams(q); u.set("escolha", escolha);
+      return `<p><a href="/o/oauth2/v2/auth?${esc(u.toString())}">${texto}</a></p>`;
+    };
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    return res.end(`<!doctype html><meta charset="utf-8"><title>Google (falso)</title>
+<style>body{font:16px system-ui;max-width:420px;margin:60px auto;padding:0 16px}a{display:block;padding:12px 14px;border:1px solid #ccc;border-radius:10px;text-decoration:none;color:#1a1a1a}a:hover{background:#f3f3f3}</style>
+<h2>Login do Google (falso, para teste)</h2><p>Escolha a conta:</p>
+${link("fulana", "Fulana Teste (convidada)")}
+${link("fulana:sem-agenda", "Fulana Teste, desmarcando a permissão da agenda")}
+${link("beltrano", "Beltrano (sem convite)")}
+${link("cancelar", "Cancelar")}`);
   }
-  if (p === "/api/auth/me") {
-    if (auth === `Bearer ${JWT}` || auth === `Bearer ${JWT2}`) return j(200, { id: "1", name: "Fulana Teste", email: "fulana@gmail.com", isAdmin: false });
-    return j(401);
+  if (p === "/token" && req.method === "POST") {
+    if (b.client_id !== CLIENT_ID || b.client_secret !== CLIENT_SECRET) return j(401, { error: "invalid_client" });
+    if (b.grant_type === "authorization_code") {
+      const c = codigos.get(b.code);
+      codigos.delete(b.code);
+      if (!c || c.redirect !== b.redirect_uri) return j(400, { error: "invalid_grant" });
+      if (createHash("sha256").update(String(b.code_verifier ?? "")).digest("base64url") !== c.desafio) return j(400, { error: "invalid_grant", error_description: "PKCE" });
+      const pe = PESSOAS[c.pessoa];
+      const darRefresh = c.consentiu || !jaConsentiram.has(pe.sub);
+      jaConsentiram.add(pe.sub);
+      const idToken = [b64u({ alg: "RS256" }), b64u({ iss: "https://accounts.google.com", aud: CLIENT_ID, sub: pe.sub, email: pe.email, email_verified: true, name: pe.nome, exp: Math.floor(Date.now() / 1000) + 3600 }), "assinatura"].join(".");
+      reconectar = false;
+      return j(200, { access_token: "google-at", expires_in: 3599, scope: c.escopo, token_type: "Bearer", id_token: idToken, ...(darRefresh ? { refresh_token: "1//rt-" + pe.sub } : {}) });
+    }
+    if (b.grant_type === "refresh_token") {
+      if (reconectar || !String(b.refresh_token).startsWith("1//rt-")) return j(400, { error: "invalid_grant" });
+      acessoPedidos++;
+      return j(200, { access_token: "google-at", expires_in: 3599, token_type: "Bearer" });
+    }
+    return j(400, { error: "unsupported_grant_type" });
   }
-  if (p === "/api/auth/google/acesso") {
-    if (auth !== `Bearer ${JWT}` && auth !== `Bearer ${JWT2}`) return j(401);
-    if (req.headers["x-agenda-servico"] !== SEGREDO) return j(403, { message: "Só o serviço da agenda." });
-    if (auth === `Bearer ${JWT2}`) return j(409, { message: "convite" });
-    if (reconectar) return j(409, { message: "reconectar" });
-    acessoPedidos++;
-    return j(200, { accessToken: "google-at", expiraEm: new Date(Date.now() + 3600000).toISOString() });
+  if (p === "/revoke" && req.method === "POST") {
+    log.push(`revoke ${String(b.token ?? "").slice(0, 10)}`);
+    for (const [sub] of Object.values(PESSOAS).map((x) => [x.sub])) if (b.token === "1//rt-" + sub) jaConsentiram.delete(sub);
+    return j(200, {});
   }
-  if (p === "/api/auth/google" && req.method === "DELETE") return auth === `Bearer ${JWT}` ? j(204) : j(401);
 
   // ----- Google -----
   if (!p.startsWith("/calendar/v3/")) return j(404);

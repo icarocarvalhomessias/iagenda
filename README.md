@@ -24,7 +24,9 @@ O chat mexe em dados reais de outras pessoas, então boa parte do código é sob
 - **Apagar ou mudar uma série inteira não acontece pela palavra da IA**: vira um pedido pendente que só o botão "Confirmar" da tela executa.
 - Título e descrição de convite são tratados como dado, nunca como instrução (qualquer pessoa pode mandar um convite).
 - Limites por mensagem (quantos eventos dá para criar, mudar ou apagar) e por dia.
-- O access token do Google fica só na memória do processo; o navegador recebe apenas um cookie `HttpOnly; SameSite=Strict; Secure`.
+- Login com Google feito no próprio servidor (OAuth 2.0 com PKCE e `state` amarrado a um cookie do navegador), só para e-mails convidados.
+- O refresh token do Google fica no SQLite cifrado com AES-256-GCM; o access token, só na memória. O navegador recebe apenas um cookie de sessão aleatório (`HttpOnly; SameSite=Strict; Secure`), e o banco guarda só o hash dele.
+- "Sair e desconectar o Google" revoga a autorização no Google e apaga a pessoa, a conversa, os remédios e os avisos.
 - CSP restrita, todo texto vindo do Google entra na página por `textContent`, conferência de origem nas rotas que mudam algo.
 - Web Push implementado só com `node:crypto` (RFC 8291, `aes128gcm` e JWT VAPID ES256), aceitando apenas os hosts de push dos navegadores.
 - Em produção, o serviço systemd roda com usuário próprio, sem sudo e com o sistema de arquivos travado (`deploy/agenda-web.service`).
@@ -39,8 +41,10 @@ O chat mexe em dados reais de outras pessoas, então boa parte do código é sob
 
 | Arquivo | O que faz |
 |---|---|
-| `servidor.ts` | Servidor HTTP, rotas `/app/*`, sessão, cabeçalhos de segurança |
-| `agenda.ts` | Login (pelo serviço de contas) e Google Calendar: listar, criar, editar, apagar, marcar feito |
+| `servidor.ts` | Servidor HTTP, rotas `/auth/*` e `/app/*`, sessão, cabeçalhos de segurança |
+| `auth.ts` | Login com Google, convites, sessões e o refresh token cifrado |
+| `admin.ts` | Linha de comando: convidar, tirar convite, listar e apagar pessoas |
+| `agenda.ts` | Google Calendar: listar, criar, editar, apagar, marcar feito |
 | `chat.ts` | Chat: prompt, ferramentas, travas, confirmação, foto e áudio |
 | `remedios.ts` | Remédios, estoque, doses e relatório |
 | `push.ts` | Web Push e a rodada de avisos a cada 5 minutos |
@@ -51,37 +55,44 @@ O chat mexe em dados reais de outras pessoas, então boa parte do código é sob
 
 ## Rodar no computador
 
-Não precisa de conta Google nem de chave de API: o `teste/falso.ts` imita o serviço de login, o Google Calendar e a API da Anthropic com dados fictícios.
+Não precisa de conta Google nem de chave de API: o `teste/falso.ts` imita o login do Google, o Google Calendar e a API da Anthropic com dados fictícios.
 
 ```
 npm install
 node teste/local.ts
 ```
 
-Depois abra <http://127.0.0.1:8091/#codigo=codigo-de-teste-1234567890>.
+Depois abra <http://127.0.0.1:8091> (use `127.0.0.1`, não `localhost`) e clique em "Entrar com Google". A tela de login falsa deixa escolher cada caso: a pessoa convidada, alguém sem convite, quem desmarca a permissão da agenda e quem cancela.
 
-## Login
+## Login com Google
 
-O login com Google não fica neste repositório: ele é feito por um serviço separado (outro projeto meu, em .NET), que guarda o refresh token do Google criptografado, controla a lista de convidados e emite o JWT. A IAgenda conversa com ele por estas rotas:
+1. No [Google Cloud Console](https://console.cloud.google.com/), crie um projeto e ative a **Google Calendar API**.
+2. Em "Tela de consentimento OAuth", escolha o tipo externo e adicione os escopos `openid`, `email`, `profile` e `.../auth/calendar.events`. Publicado como "Em produção" sem verificação, o app aceita até 100 pessoas (com o aviso de "app não verificado"); em "Teste", o login vence a cada 7 dias.
+3. Em "Credenciais", crie um **ID do cliente OAuth** do tipo "Aplicativo da Web", com o URI de redirecionamento `https://SEU-DOMINIO/auth/google/retorno`.
+4. Configure `AGENDA_SITE`, `AGENDA_GOOGLE_CLIENT_ID` e o segredo do cliente (tabela abaixo).
+5. Convide quem pode entrar:
 
-| Rota | Para quê |
-|---|---|
-| `GET /api/auth/google/start` | Começa o login com Google e volta para a IAgenda com `#codigo=...` |
-| `POST /api/auth/google/sessao` | Troca o código pelo JWT da pessoa |
-| `GET /api/auth/me` | Quem está logado |
-| `GET /api/auth/google/acesso` | Access token do Google da pessoa (exige o segredo do serviço no cabeçalho `X-Agenda-Servico`) |
-| `DELETE /api/auth/google` | Revoga o Google e apaga a conta |
+```
+node admin.ts convidar fulana@gmail.com
+node admin.ts listar
+node admin.ts tirar fulana@gmail.com      # fecha as sessões; os dados ficam
+node admin.ts apagar fulana@gmail.com     # revoga no Google e apaga tudo da pessoa
+```
 
-Para usar com outro provedor de login, basta trocar as funções de `agenda.ts` que chamam essas rotas.
+Ou use `AGENDA_CONVITES=fulana@gmail.com,beltrano@gmail.com` (`*` deixa qualquer conta Google entrar).
+
+Rode o `admin.ts` com as mesmas variáveis do servidor (pelo menos `AGENDA_DADOS` e `AGENDA_CHAVE`), para usar o mesmo banco.
 
 ## Variáveis de ambiente
 
 | Variável | Padrão | Para quê |
 |---|---|---|
 | `AGENDA_HOST`, `AGENDA_PORTA` | `127.0.0.1`, `8091` | Onde o servidor escuta |
-| `AGENDA_CONTAS` | `http://127.0.0.1:5000` | Endereço do serviço de login |
-| `AGENDA_SITE` | `http://127.0.0.1:8091` | Endereço público (usado nos avisos) |
-| `AGENDA_SEGREDO` | | Arquivo com o segredo do serviço (ou `LoadCredential` do systemd) |
+| `AGENDA_SITE` | `http://127.0.0.1:8091` | Endereço público (retorno do login e links dos avisos) |
+| `AGENDA_GOOGLE_CLIENT_ID` | | ID do cliente OAuth do Google |
+| `AGENDA_GOOGLE_CLIENT_SECRET` | | Segredo do cliente (ou o caminho em `AGENDA_GOOGLE_CLIENT_SECRET_ARQUIVO`, ou `LoadCredential=google-client-secret`) |
+| `AGENDA_CHAVE` | gerada em `dados/` | Caminho do arquivo com a chave mestra (32 bytes em base64 ou hex) que cifra os refresh tokens. Em produção, deixe fora da pasta de dados (ou `LoadCredential=chave-mestra`) |
+| `AGENDA_CONVITES` | | E-mails liberados, separados por vírgula (`*` para todos), além dos de `admin.ts convidar` |
 | `AGENDA_ANTHROPIC_CHAVE` | | Arquivo com a chave da API da Anthropic. Sem ela, o chat fica desligado |
 | `AGENDA_MODELO`, `AGENDA_ESFORCO` | `claude-opus-5-5`, `low` | Modelo e esforço do chat |
 | `AGENDA_CHAT_DIA` | `100` | Mensagens por pessoa por dia |

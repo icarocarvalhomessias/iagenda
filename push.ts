@@ -1,9 +1,9 @@
 // agenda-web: avisos por push (Web Push, RFC 8291 + VAPID), por pessoa. Sem biblioteca: a cifra aes128gcm e o
 // JWT ES256 saem do node:crypto (chaves VAPID próprias, geradas na primeira vez).
 //
-// Quem liga os avisos num aparelho deixa a assinatura do navegador e o token do Contas (o mesmo do cookie, que vale
-// 30 dias) guardados aqui: é com ele que a rodada lê a agenda Google da pessoa com o navegador fechado. Vencido o
-// token, a pessoa recebe um último aviso para entrar de novo; ao entrar, os avisos voltam sozinhos.
+// Quem liga os avisos num aparelho deixa a assinatura do navegador guardada aqui. A rodada lê a agenda Google da
+// pessoa com o navegador fechado pela autorização guardada no login (auth.ts). Se o Google deixar de aceitar a
+// autorização, a pessoa recebe um último aviso para entrar de novo; ao entrar, os avisos voltam sozinhos.
 //
 // A rodada (a cada 5 minutos) manda, no fuso da agenda de cada pessoa:
 //   - "Hoje": de manhã (a partir das 8h, até as 12h), o que tem no dia e não está feito;
@@ -12,7 +12,7 @@
 //   - "Remédios da manhã/tarde/noite/das HH:MM": no horário (até 2 h depois), o que ainda não foi marcado como tomado;
 //   - "Remédio acabando": de manhã, o que dá para 5 dias ou menos (ou está com a caixa vencida).
 // Cada aviso sai uma vez só (tabela push_enviados).
-import { createCipheriv, createECDH, createHash, createPrivateKey, generateKeyPairSync, hkdfSync, randomBytes, sign } from "node:crypto";
+import { createCipheriv, createECDH, createPrivateKey, generateKeyPairSync, hkdfSync, randomBytes, sign } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ErroHttp, MIN, type Sessao, type Evento, fuso, listarEventos, partesNoFuso } from "./agenda.ts";
@@ -30,7 +30,6 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS push_assinaturas (endpoint TEXT PRIMARY KEY, usuario TEXT NOT NULL, p256dh TEXT NOT NULL,
     auth TEXT NOT NULL, criado INTEGER NOT NULL);
   CREATE INDEX IF NOT EXISTS push_assinaturas_usuario ON push_assinaturas (usuario);
-  CREATE TABLE IF NOT EXISTS push_sessoes (usuario TEXT PRIMARY KEY, jwt TEXT NOT NULL, expira INTEGER NOT NULL);
   CREATE TABLE IF NOT EXISTS push_enviados (usuario TEXT NOT NULL, chave TEXT NOT NULL, quando INTEGER NOT NULL,
     PRIMARY KEY (usuario, chave));
 `);
@@ -95,20 +94,7 @@ export async function enviar(usuario: string, aviso: Aviso): Promise<number> {
 }
 
 // ---------- assinaturas ----------
-function expiraDoJwt(jwt: string): number {
-  try { return Number(JSON.parse(Buffer.from(jwt.split(".")[1], "base64url").toString("utf8")).exp) * 1000 || 0; } catch { return 0; }
-}
-// Guarda (ou renova) o token do Contas de quem tem aparelho com avisos ligados.
-export function guardarSessao(usuario: string, jwt: string) {
-  if (!usuario) return;
-  const tem = db.prepare("SELECT 1 FROM push_assinaturas WHERE usuario = ? LIMIT 1").get(usuario);
-  if (!tem) return;
-  db.prepare(`INSERT INTO push_sessoes (usuario, jwt, expira) VALUES (?, ?, ?)
-    ON CONFLICT (usuario) DO UPDATE SET jwt = excluded.jwt, expira = excluded.expira WHERE push_sessoes.jwt <> excluded.jwt`)
-    .run(usuario, jwt, expiraDoJwt(jwt));
-}
-
-export function assinar(usuario: string, jwt: string, sub: any) {
+export function assinar(usuario: string, sub: any) {
   let valida = false;
   try {
     const u = new URL(sub?.endpoint);
@@ -124,13 +110,10 @@ export function assinar(usuario: string, jwt: string, sub: any) {
   // No máximo MAX_APARELHOS por pessoa: o mais antigo sai.
   db.prepare(`DELETE FROM push_assinaturas WHERE usuario = ? AND endpoint NOT IN
     (SELECT endpoint FROM push_assinaturas WHERE usuario = ? ORDER BY criado DESC LIMIT ${MAX_APARELHOS})`).run(usuario, usuario);
-  guardarSessao(usuario, jwt);
   return estado(usuario);
 }
 export function desassinar(usuario: string, endpoint: unknown) {
   if (typeof endpoint === "string") db.prepare("DELETE FROM push_assinaturas WHERE usuario = ? AND endpoint = ?").run(usuario, endpoint);
-  if (!db.prepare("SELECT 1 FROM push_assinaturas WHERE usuario = ? LIMIT 1").get(usuario))
-    db.prepare("DELETE FROM push_sessoes WHERE usuario = ?").run(usuario);
   return estado(usuario);
 }
 export function estado(usuario: string) {
@@ -139,7 +122,7 @@ export function estado(usuario: string) {
 }
 export function apagarTudo(usuario: string) {
   if (!usuario) return;
-  for (const t of ["push_assinaturas", "push_sessoes", "push_enviados"]) db.prepare(`DELETE FROM ${t} WHERE usuario = ?`).run(usuario);
+  for (const t of ["push_assinaturas", "push_enviados"]) db.prepare(`DELETE FROM ${t} WHERE usuario = ?`).run(usuario);
 }
 
 // ---------- rodada ----------
@@ -202,17 +185,10 @@ async function rodada() {
   if (rodando) return;
   rodando = true;
   try {
-    const sessoes = db.prepare("SELECT usuario, jwt, expira FROM push_sessoes").all() as { usuario: string; jwt: string; expira: number }[];
+    const pessoas = db.prepare("SELECT DISTINCT usuario FROM push_assinaturas").all() as { usuario: string }[];
     const agora = Date.now();
-    for (const { usuario, jwt, expira } of sessoes) {
-      if (expira && expira <= agora) {
-        if (!jaEnviado(usuario, `sessao|${expira}`)) {
-          await enviar(usuario, { titulo: "Seus avisos pararam", texto: "O login da IAgenda venceu. Entre de novo para voltar a receber os avisos.", tag: "sessao", url: "/" });
-          marcarEnviado(usuario, `sessao|${expira}`);
-        }
-        continue;
-      }
-      const s: Sessao = { jwt, chave: createHash("sha256").update(jwt).digest("hex") };
+    for (const { usuario } of pessoas) {
+      const s: Sessao = { usuario };
       try {
         const tz = await fuso(s);
         // Só o que a pessoa deixou ligado no menu do perfil (Compromissos, Contas, Remédios).
@@ -229,9 +205,10 @@ async function rodada() {
           marcarEnviado(usuario, chave);
         }
       } catch (e) {
-        if (e instanceof ErroHttp && e.codigo === "convite") { apagarTudo(usuario); continue; }
-        if (e instanceof ErroHttp && (e.codigo === "sessao" || e.codigo === "reconectar")) {
-          const chave = `${e.codigo}|${expira}`;
+        if (e instanceof ErroHttp && (e.codigo === "convite" || e.codigo === "sessao")) { apagarTudo(usuario); continue; }
+        if (e instanceof ErroHttp && e.codigo === "reconectar") {
+          // Um aviso por dia, no máximo, enquanto a pessoa não entrar de novo.
+          const chave = `reconectar|${new Date(agora).toISOString().slice(0, 10)}`;
           if (!jaEnviado(usuario, chave)) {
             await enviar(usuario, { titulo: "Seus avisos pararam", texto: "Entre de novo na IAgenda com o Google para voltar a receber os avisos.", tag: "sessao", url: "/" });
             marcarEnviado(usuario, chave);

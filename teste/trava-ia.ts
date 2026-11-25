@@ -1,7 +1,7 @@
 // Teste da trava com a IA de VERDADE (gasta alguns centavos): manda pedidos fora do assunto e pedidos normais,
 // só uma chamada cada, e mostra se a IA chamou fora_do_assunto ou uma ferramenta da agenda. Não executa nada.
 // Na VPS, como root:
-//   AGENDA_SEGREDO=/etc/agenda-web/servico-segredo AGENDA_ANTHROPIC_CHAVE=/etc/agenda-web/anthropic-chave \
+//   AGENDA_ANTHROPIC_CHAVE=/etc/agenda-web/anthropic-chave \
 //   AGENDA_DADOS=/tmp/agenda-teste node /opt/agenda-web/teste/trava-ia.ts
 import Anthropic from "@anthropic-ai/sdk";
 import { readFileSync } from "node:fs";

@@ -6,15 +6,14 @@ const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julh
 const DOW = ['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB'];
 const DOW_LONGO = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
 const ERROS = {
-  convite: 'Esse Gmail ainda não foi convidado. Peça ao Icaro para liberar o seu e-mail.',
+  convite: 'Esse Gmail ainda não foi convidado. Peça a quem cuida desta IAgenda para liberar o seu e-mail.',
   agenda: 'Sem a permissão da agenda não dá para continuar. Entre de novo e deixe marcada a caixa da Google Agenda.',
   conta: 'Esse e-mail já é usado em outra conta daqui. Entre com outro Gmail.',
   expirou: 'O login demorou demais. É só entrar de novo.',
   cancelado: 'O login foi cancelado. Quando quiser, é só entrar de novo.',
   configuracao: 'O login ainda não está pronto. Tente de novo mais tarde.',
   falhou: 'Não deu certo agora. Tente de novo em um minuto.',
-  codigo: 'O login venceu antes de terminar. É só entrar de novo.',
-  encerrado: 'O seu acesso foi encerrado. Fale com o Icaro se isso for engano.',
+  encerrado: 'O seu acesso foi encerrado. Fale com quem cuida desta IAgenda se isso for engano.',
   saiu: 'Você saiu. Até a próxima!',
   desconectado: 'Pronto: a IAgenda não tem mais acesso à sua agenda Google.',
 };
@@ -90,7 +89,7 @@ function mostrarEntrar(codErro) {
 }
 function pedirReconectar() {
   const a = $('aviso');
-  a.replaceChildren('O Google pediu para você entrar de novo. ', Object.assign(el('a', null, 'Entrar com Google'), { href: '/api/auth/google/start?consentir=true' }));
+  a.replaceChildren('O Google pediu para você entrar de novo. ', Object.assign(el('a', null, 'Entrar com Google'), { href: '/auth/google/start?consentir=true' }));
   a.hidden = false;
 }
 function avisar(texto) {
@@ -104,12 +103,8 @@ function avisar(texto) {
 async function iniciar() {
   const h = new URLSearchParams(location.hash.slice(1));
   const diaPedido = h.get('dia');
-  if (h.has('codigo') || h.has('erro') || h.has('dia') || h.has('remedios')) history.replaceState(null, '', location.pathname);
+  if (h.has('erro') || h.has('dia') || h.has('remedios')) history.replaceState(null, '', location.pathname);
   if (h.get('erro')) return mostrarEntrar(h.get('erro'));
-  if (h.get('codigo')) {
-    try { await api('POST', '/app/sessao', { codigo: h.get('codigo') }); }
-    catch (e) { return mostrarEntrar(e.codigo === 'codigo' ? 'codigo' : 'falhou'); }
-  }
   let eu;
   try { eu = await api('GET', '/app/eu'); }
   catch (e) { if (e.codigo !== 'sessao' && e.codigo !== 'convite') mostrarEntrar('falhou'); return; }

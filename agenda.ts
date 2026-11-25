@@ -1,14 +1,13 @@
-// agenda-web: o que fala com o Contas e com a agenda Google da pessoa. Usado pela página (servidor.ts)
-// e pelo chat (chat.ts), para os dois mexerem na agenda do mesmo jeito e com as mesmas conferências.
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+// agenda-web: o que fala com a agenda Google da pessoa. Usado pela página (servidor.ts), pelo chat (chat.ts)
+// e pelos avisos (push.ts), para os três mexerem na agenda do mesmo jeito e com as mesmas conferências.
+import { acessoGoogle as pedirAcesso, ErroAcesso, esquecerAcesso, usuario } from "./auth.ts";
 
-export const CONTAS = (process.env.AGENDA_CONTAS ?? "http://127.0.0.1:5000").replace(/\/$/, "");
 const GOOGLE = (process.env.AGENDA_GOOGLE ?? "https://www.googleapis.com/calendar/v3").replace(/\/$/, "");
 const FUSO_PADRAO = "America/Sao_Paulo";
 export const MIN = 60_000;
 
-export type Sessao = { jwt: string; chave: string };
+// Quem está pedindo: o id da pessoa (tabela usuarios de auth.ts). A página, o chat e os avisos usam o mesmo.
+export type Sessao = { usuario: string };
 
 export class ErroHttp extends Error {
   status: number;
@@ -20,66 +19,26 @@ export class ErroHttp extends Error {
   }
 }
 
-// Segredo para o Contas entregar o access token: pelo LoadCredential do systemd ou por AGENDA_SEGREDO (arquivo).
-function lerSegredo(): string {
-  const arq = process.env.AGENDA_SEGREDO
-    ?? (process.env.CREDENTIALS_DIRECTORY ? join(process.env.CREDENTIALS_DIRECTORY, "servico-segredo") : "");
-  if (!arq) throw new Error("Falta o segredo do serviço (LoadCredential servico-segredo ou AGENDA_SEGREDO).");
-  const s = readFileSync(arq, "utf8").trim();
-  if (s.length < 32) throw new Error("O segredo do serviço é curto demais.");
-  return s;
-}
-const SEGREDO = lerSegredo();
-
-// ---------- Contas ----------
-export async function contas(caminho: string, init: RequestInit = {}): Promise<Response> {
-  try {
-    return await fetch(CONTAS + caminho, { ...init, signal: AbortSignal.timeout(15_000) });
-  } catch (e) {
-    console.error("Contas fora do ar:", (e as Error).message);
-    throw new ErroHttp(502, "contas");
-  }
+export function eu(s: Sessao) {
+  const u = usuario(s.usuario);
+  if (!u) throw new ErroHttp(401, "sessao");
+  return u;
 }
 
-const eus = new Map<string, { id: string; nome: string; email: string; ate: number }>();
-export async function eu(s: Sessao) {
-  const c = eus.get(s.chave);
-  if (c && c.ate > Date.now()) return c;
-  const r = await contas("/api/auth/me", { headers: { Authorization: `Bearer ${s.jwt}` } });
-  if (r.status === 401 || r.status === 403) throw new ErroHttp(401, "sessao");
-  if (!r.ok) throw new ErroHttp(502, "contas");
-  const j: any = await r.json();
-  const v = { id: String(j.id ?? ""), nome: String(j.name ?? ""), email: String(j.email ?? ""), ate: Date.now() + 5 * MIN };
-  eus.set(s.chave, v);
-  return v;
-}
-
-const acessos = new Map<string, { token: string; ate: number }>();
 export async function acessoGoogle(s: Sessao): Promise<string> {
-  const c = acessos.get(s.chave);
-  if (c && c.ate > Date.now()) return c.token;
-  const r = await contas("/api/auth/google/acesso", {
-    headers: { Authorization: `Bearer ${s.jwt}`, "X-Agenda-Servico": SEGREDO },
-  });
-  if (r.status === 401) throw new ErroHttp(401, "sessao");
-  if (r.status === 409) {
-    const j: any = await r.json().catch(() => ({}));
-    throw new ErroHttp(409, j.message === "convite" ? "convite" : "reconectar");
+  try { return await pedirAcesso(s.usuario); }
+  catch (e) {
+    if (!(e instanceof ErroAcesso)) throw e;
+    if (e.message === "sessao") throw new ErroHttp(401, "sessao");
+    if (e.message === "convite" || e.message === "reconectar") throw new ErroHttp(409, e.message);
+    throw new ErroHttp(502, "google");
   }
-  if (r.status === 403) { console.error("O Contas recusou o segredo do serviço ou o papel."); throw new ErroHttp(502, "contas"); }
-  if (!r.ok) throw new ErroHttp(502, "google");
-  const j: any = await r.json();
-  const ate = Math.min(Date.parse(j.expiraEm) || 0, Date.now() + 50 * MIN) - MIN;
-  acessos.set(s.chave, { token: String(j.accessToken), ate });
-  return String(j.accessToken);
 }
 
-export function esquecer(chave: string) { acessos.delete(chave); eus.delete(chave); fusos.delete(chave); }
+export function esquecer(uid: string) { esquecerAcesso(uid); fusos.delete(uid); }
 
 setInterval(() => {
   const agora = Date.now();
-  for (const [k, v] of acessos) if (v.ate < agora) acessos.delete(k);
-  for (const [k, v] of eus) if (v.ate < agora) eus.delete(k);
   for (const [k, v] of fusos) if (v.ate < agora) fusos.delete(k);
 }, 10 * MIN).unref();
 
@@ -98,7 +57,7 @@ export async function google(s: Sessao, metodo: string, caminho: string, corpo?:
     console.error("Google fora do ar:", (e as Error).message);
     throw new ErroHttp(502, "google");
   }
-  if (r.status === 401) { acessos.delete(s.chave); throw new ErroHttp(502, "google", "O Google recusou o acesso agora. Tente de novo."); }
+  if (r.status === 401) { esquecerAcesso(s.usuario); throw new ErroHttp(502, "google", "O Google recusou o acesso agora. Tente de novo."); }
   if (r.status === 403) throw new ErroHttp(403, "proibido", "O Google não deixou mexer nesse evento (é de outra pessoa?).");
   if (r.status === 404 || r.status === 410) throw new ErroHttp(404, "sumiu", "Esse evento não existe mais na sua agenda.");
   if (!r.ok) {
@@ -110,14 +69,14 @@ export async function google(s: Sessao, metodo: string, caminho: string, corpo?:
 
 const fusos = new Map<string, { fuso: string; ate: number }>();
 export async function fuso(s: Sessao): Promise<string> {
-  const c = fusos.get(s.chave);
+  const c = fusos.get(s.usuario);
   if (c && c.ate > Date.now()) return c.fuso;
   let f = FUSO_PADRAO;
   try {
     const cal = await google(s, "GET", "/calendars/primary");
     if (typeof cal?.timeZone === "string" && cal.timeZone) f = cal.timeZone;
   } catch (e) { if (e instanceof ErroHttp && (e.status === 401 || e.status === 409)) throw e; }
-  fusos.set(s.chave, { fuso: f, ate: Date.now() + 60 * MIN });
+  fusos.set(s.usuario, { fuso: f, ate: Date.now() + 60 * MIN });
   return f;
 }
 

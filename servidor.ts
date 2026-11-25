@@ -1,10 +1,10 @@
-// agenda-web: a IAgenda para outras pessoas , para pessoas convidadas.
-// A pessoa entra com Google pelo Contas (/api/auth/google/*, que o proxy reverso manda direto para o Contas) e volta
-// para cá com #codigo=...; a página troca o código pela sessão (/app/sessao) e daí em diante tudo passa por aqui.
+// agenda-web: a IAgenda, para pessoas convidadas.
+// A pessoa entra com Google (auth.ts) e volta já com o cookie da sessão; daí em diante tudo passa por aqui.
 //
 //   /                       a página da agenda (publico/index.html, app.js, app.css)
 //   /privacidade            política de privacidade
-//   POST /app/sessao        { codigo } -> pede ao Contas o token da pessoa e guarda num cookie HttpOnly
+//   GET  /auth/google/start     manda para o Google (?consentir=true pede o consentimento de novo)
+//   GET  /auth/google/retorno   volta do Google, abre a sessão (cookie HttpOnly) e manda para /
 //   GET  /app/eu            nome e e-mail de quem está logado
 //   GET  /app/eventos       ?de=ISO&ate=ISO: eventos da agenda principal (primary) da pessoa, no máximo 62 dias
 //   GET  /app/contas        ?de=ISO&ate=ISO: só as contas a pagar (eventos com icarusTipo=conta), no máximo 125 dias
@@ -13,7 +13,7 @@
 //   DELETE /app/eventos/:id ?todas=1 apaga a série inteira
 //   POST /app/eventos/:id/feito  { feito }: "✓ " no título e icarusFeito em extendedProperties.private
 //   POST /app/sair          apaga o cookie
-//   POST /app/desconectar   revoga no Google, apaga a conta no Contas, a conversa do chat e o cookie
+//   POST /app/desconectar   revoga no Google e apaga a pessoa, a conversa do chat, os remédios, os avisos e o cookie
 //   GET/POST/DELETE /app/chat, POST /app/chat/confirmar   o chat (chat.ts)
 //   GET/POST/DELETE /app/push, POST /app/push/teste       avisos no aparelho (push.ts)
 //   POST /app/funcoes       { compromissos?, contas?, remedios? }: liga e desliga as funções (funcoes.ts)
@@ -26,17 +26,17 @@
 // Os eventos não ficam aqui nem no repositório: a fonte de verdade é a agenda Google de cada pessoa. Só as
 // mensagens do chat e os remédios ficam guardados (SQLite em /var/lib/agenda-web), até a pessoa limpar ou desconectar.
 // Código comum com o chat em agenda.ts.
-// O access token do Google vem do Contas (/api/auth/google/acesso, com o segredo do serviço) e fica só na
-// memória deste processo; o navegador nunca recebe. Na VPS: /opt/agenda-web, serviço agenda-web.service,
-// usuário agenda-web (sem sudo, sem acesso ao clone do repo), escutando só atrás do proxy reverso.
+// O refresh token do Google fica cifrado no SQLite e o access token só na memória deste processo; o navegador
+// nunca recebe nenhum dos dois. Em produção: serviço systemd (deploy/agenda-web.service), usuário próprio sem sudo,
+// escutando só atrás do proxy reverso.
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
-import { createHash } from "node:crypto";
-import { ErroHttp, MIN, type Sessao, contas, eu, esquecer, fuso, partesNoFuso, listarEventos, criarEvento, editarEvento, apagarEvento, marcarFeito, idValido } from "./agenda.ts";
+import { ErroHttp, MIN, type Sessao, eu, esquecer, fuso, partesNoFuso, listarEventos, criarEvento, editarEvento, apagarEvento, marcarFeito, idValido } from "./agenda.ts";
 import { chatConfigurado, conversa, enviar, confirmar, limparConversa, lerCaixa } from "./chat.ts";
 import * as avisos from "./push.ts";
 import * as remedios from "./remedios.ts";
 import * as fn from "./funcoes.ts";
+import * as auth from "./auth.ts";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -45,7 +45,7 @@ const PORTA = Number(process.env.AGENDA_PORTA ?? 8091);
 // Sem HTTPS (teste no notebook), o cookie não pode ter Secure nem o prefixo __Host-.
 const SEGURO = process.env.AGENDA_INSEGURO !== "1";
 const COOKIE = SEGURO ? "__Host-agenda" : "agenda";
-const SESSAO_DIAS = 30;   // igual a GoogleAgenda:JwtDias do Contas
+const COOKIE_LOGIN = SEGURO ? "__Host-agenda-login" : "agenda-login";
 const AQUI = dirname(fileURLToPath(import.meta.url));
 const PUBLICO = join(AQUI, "publico");
 
@@ -120,26 +120,37 @@ function estatico(res: ServerResponse, nome: string) {
   res.end(conteudo);
 }
 
-// ---------- sessão (cookie com o token do Contas) ----------
+// ---------- sessão (cookie com um valor aleatório; no banco, só o hash) ----------
 function cookieSessao(valor: string, segundos: number): string {
   return `${COOKIE}=${valor}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${segundos}${SEGURO ? "; Secure" : ""}`;
 }
+// O cookie do login vai e volta do Google numa navegação vinda de outro site: por isso Lax (Strict não voltaria).
+function cookieLogin(valor: string, segundos: number): string {
+  return `${COOKIE_LOGIN}=${valor}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${segundos}${SEGURO ? "; Secure" : ""}`;
+}
 
-function lerCookie(req: IncomingMessage): string | null {
+function lerCookie(req: IncomingMessage, nome = COOKIE): string | null {
   for (const parte of (req.headers.cookie ?? "").split(";")) {
     const i = parte.indexOf("=");
-    if (i > 0 && parte.slice(0, i).trim() === COOKIE) {
+    if (i > 0 && parte.slice(0, i).trim() === nome) {
       const v = parte.slice(i + 1).trim();
-      return /^[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+$/.test(v) ? v : null;
+      return /^[A-Za-z0-9_\-]{16,100}$/.test(v) ? v : null;
     }
   }
   return null;
 }
 
 function sessao(req: IncomingMessage): Sessao {
-  const jwt = lerCookie(req);
-  if (!jwt) throw new ErroHttp(401, "sessao");
-  return { jwt, chave: createHash("sha256").update(jwt).digest("hex") };
+  const valor = lerCookie(req);
+  const u = valor ? auth.lerSessao(valor) : null;
+  if (!u) throw new ErroHttp(401, "sessao");
+  return { usuario: u.id };
+}
+
+function redirecionar(res: ServerResponse, para: string, cookies: string[] = []) {
+  cabecalhosBase(res);
+  res.writeHead(302, { Location: para, "Cache-Control": "no-store", ...(cookies.length ? { "Set-Cookie": cookies } : {}) });
+  res.end();
 }
 
 // Pedidos que mudam algo: só da própria página. O cookie é SameSite=Strict, e o cabeçalho X-Agenda obriga
@@ -182,43 +193,45 @@ async function rotas(req: IncomingMessage, res: ServerResponse) {
   const metodo = req.method ?? "GET";
 
   if ((metodo === "GET" || metodo === "HEAD") && ESTATICOS[caminho]) return estatico(res, ESTATICOS[caminho]);
+  const ip = String(req.headers["x-forwarded-for"] ?? req.socket.remoteAddress ?? "").split(",")[0].trim();
+
+  // ----- login com Google -----
+  if (caminho === "/auth/google/start" && metodo === "GET") {
+    try {
+      limitar("ip:" + ip, 20);
+      const { url: para, state } = auth.inicio(url.searchParams.get("consentir") === "true");
+      return redirecionar(res, para, [cookieLogin(state, 10 * 60)]);
+    } catch (e) {
+      return redirecionar(res, "/#erro=" + (e instanceof auth.ErroLogin ? e.message : "falhou"));
+    }
+  }
+  if (caminho === "/auth/google/retorno" && metodo === "GET") {
+    const limpar = cookieLogin("", 0);
+    try {
+      limitar("ip:" + ip, 20);
+      const r = await auth.retorno(url.searchParams, lerCookie(req, COOKIE_LOGIN));
+      if ("consentir" in r) return redirecionar(res, "/auth/google/start?consentir=true", [limpar]);
+      return redirecionar(res, "/", [limpar, cookieSessao(r.sessao, auth.SESSAO_DIAS * 24 * 3600)]);
+    } catch (e) {
+      if (!(e instanceof auth.ErroLogin)) console.error("login:", e);
+      return redirecionar(res, "/#erro=" + (e instanceof auth.ErroLogin ? e.message : "falhou"), [limpar]);
+    }
+  }
   if (!caminho.startsWith("/app/")) return json(res, 404, { erro: "nao-achei" });
 
-  const ip = String(req.headers["x-forwarded-for"] ?? req.socket.remoteAddress ?? "").split(",")[0].trim();
   if (metodo !== "GET") conferirOrigem(req);
 
-  if (caminho === "/app/sessao" && metodo === "POST") {
-    limitar("ip:" + ip, 20);
-    const b = await lerCorpo(req, 2048);
-    const codigo = typeof b.codigo === "string" ? b.codigo : "";
-    if (!/^[A-Za-z0-9_\-]{16,200}$/.test(codigo)) throw new ErroHttp(400, "codigo");
-    const r = await contas("/api/auth/google/sessao", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ codigo }),
-    });
-    if (r.status === 401 || r.status === 400) throw new ErroHttp(401, "codigo", "O código venceu. Entre de novo.");
-    if (r.status === 429) throw new ErroHttp(429, "devagar");
-    if (!r.ok) throw new ErroHttp(502, "contas");
-    const j: any = await r.json();
-    const token = String(j.token ?? "");
-    if (!/^[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]+$/.test(token)) throw new ErroHttp(502, "contas");
-    return json(res, 200, { nome: String(j.user?.name ?? ""), email: String(j.user?.email ?? "") },
-      { "Set-Cookie": cookieSessao(token, SESSAO_DIAS * 24 * 3600) });
-  }
-
   if (caminho === "/app/sair" && metodo === "POST") {
-    const jwt = lerCookie(req);
-    if (jwt) esquecer(createHash("sha256").update(jwt).digest("hex"));
+    const valor = lerCookie(req);
+    if (valor) auth.fecharSessao(valor);
     return json(res, 200, { ok: true }, { "Set-Cookie": cookieSessao("", 0) });
   }
 
   const s = sessao(req);
-  limitar("s:" + s.chave);
+  limitar("s:" + s.usuario);
 
   if (caminho === "/app/eu" && metodo === "GET") {
-    const e = await eu(s);
-    avisos.guardarSessao(e.id, s.jwt);   // renova o token que a rodada de avisos usa
+    const e = eu(s);
     return json(res, 200, { nome: e.nome, email: e.email, chat: chatConfigurado(), funcoes: fn.funcoes(e.id) });
   }
   if (caminho === "/app/funcoes" && metodo === "POST") {
@@ -228,11 +241,10 @@ async function rotas(req: IncomingMessage, res: ServerResponse) {
   }
 
   if (caminho === "/app/desconectar" && metodo === "POST") {
-    const e = await eu(s);
-    const r = await contas("/api/auth/google", { method: "DELETE", headers: { Authorization: `Bearer ${s.jwt}` } });
-    if (!r.ok && r.status !== 401) throw new ErroHttp(502, "contas");
-    if (e.id) { limparConversa(e.id, true); avisos.apagarTudo(e.id); remedios.apagarTudo(e.id); fn.apagarTudo(e.id); }
-    esquecer(s.chave);
+    const e = eu(s);
+    await auth.desconectar(e.id);
+    limparConversa(e.id, true); avisos.apagarTudo(e.id); remedios.apagarTudo(e.id); fn.apagarTudo(e.id);
+    esquecer(e.id);
     return json(res, 200, { ok: true }, { "Set-Cookie": cookieSessao("", 0) });
   }
 
@@ -263,7 +275,7 @@ async function rotas(req: IncomingMessage, res: ServerResponse) {
   if (caminho === "/app/push" && metodo === "POST") {
     const e = await eu(s);
     const b = await lerCorpo(req, 4096);
-    return json(res, 200, avisos.assinar(e.id, s.jwt, b.assinatura));
+    return json(res, 200, avisos.assinar(e.id, b.assinatura));
   }
   if (caminho === "/app/push" && metodo === "DELETE") {
     const e = await eu(s);
@@ -345,4 +357,4 @@ avisos.iniciarRodada();
 
 createServer((req, res) => {
   rotas(req, res).catch((e) => { if (!res.headersSent) erro(res, e); else res.end(); });
-}).listen(PORTA, HOST, () => console.log(`agenda-web em http://${HOST}:${PORTA} (chat: ${chatConfigurado() ? "ligado" : "sem chave"})`));
+}).listen(PORTA, HOST, () => console.log(`agenda-web em http://${HOST}:${PORTA} (login: ${auth.loginConfigurado() ? auth.RETORNO : "falta AGENDA_GOOGLE_CLIENT_ID e o segredo"}; chat: ${chatConfigurado() ? "ligado" : "sem chave"})`));
