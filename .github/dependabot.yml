@@ -1,9 +1,14 @@
+# Atualizações mensais. Saltos grandes do Node (imagem e tipos) ficam de fora: o Node da imagem segue as versões
+# LTS, escolhidas à mão, e o @types/node acompanha o Node mínimo do projeto (engines no package.json).
 version: 2
 updates:
   - package-ecosystem: npm
     directory: /
     schedule:
       interval: monthly
+    ignore:
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: /
     schedule:
@@ -12,3 +17,6 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    ignore:
+      - dependency-name: node
+        update-types: ["version-update:semver-major"]

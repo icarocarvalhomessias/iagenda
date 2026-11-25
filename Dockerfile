@@ -1,5 +1,6 @@
 # IAgenda: Node com TypeScript direto (sem build). Os dados ficam no volume /dados.
-FROM node:22-slim
+# Node 24 (LTS). O projeto aceita a partir do 22.18 (engines no package.json).
+FROM node:24-slim
 
 ENV NODE_ENV=production \
     AGENDA_HOST=0.0.0.0 \
