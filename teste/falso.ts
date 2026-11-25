@@ -109,8 +109,86 @@ function mesclar(a: any, b: any) {
   return r;
 }
 
+// O roteiro da IA falsa: recebe o pedido no formato da Anthropic e devolve [blocos, stop_reason].
+type Saida = [any[], string];
+async function roteiro(b: any): Promise<Saida> {
+  const msgs = b.messages;
+  const ultimaUser = [...msgs].reverse().find((m: any) => m.role === "user");
+  const primeiroTexto = [...msgs].reverse().find((m: any) => m.role === "user" && typeof m.content === "string")?.content ?? "";
+  const hojeK = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+  // Botão "Ler da caixa": devolve os dados de uma caixa fictícia.
+  if (b.tool_choice?.name === "dados_da_caixa") return [[{ type: "tool_use", id: "tc1", name: "dados_da_caixa", input: {
+    e_caixa_de_remedio: true, nome: "Remedix 50 mg", unidade: "comprimido", por_caixa: 30,
+    caixa: { principio: "Remedixina", concentracao: "50 mg", forma: "comprimido revestido", apresentacao: "caixa com 30 comprimidos",
+      laboratorio: "Laboratório Teste", lote: "AB123", validade: "2027-08", registro: "1.0000.0000.000-0", tarja: "vermelha", receita: "sob prescrição" },
+  } }], "tool_use"];
+  if (Array.isArray(ultimaUser.content) && ultimaUser.content[0]?.type === "tool_result") {
+    const r0 = ultimaUser.content[0];
+    const res0 = JSON.parse(typeof r0.content === "string" && r0.content.startsWith("{") ? r0.content : "{}");
+    // Remédios: depois de listar, marca as doses da manhã; depois de cadastrar, pede a foto da caixa.
+    if (/tomei/i.test(primeiroTexto) && res0.doses_do_dia) {
+      const manha = res0.doses_do_dia.doses.filter((d: any) => d.horario === "manha" && !d.tomado);
+      if (manha.length) return [manha.map((d: any, i: number) => ({ type: "tool_use", id: "td" + i, name: "marcar_dose", input: { id: d.id, horario: "manha", tomado: true } })), "tool_use"];
+      return [[{ type: "text", text: "Os da manhã já estavam marcados." }], "end_turn"];
+    }
+    if (res0.remedio) {
+      const rr = res0.remedio;
+      const txt = r0.is_error ? "Não deu: " + r0.content
+        : res0.lembrete ? `Anotei ${rr.nome}: ${rr.dose} ${rr.unidade}, ${rr.horarios.join(" e ")}. Manda uma foto da caixa que eu anoto o resto (concentração, laboratório, validade, quantidade na caixa).`
+        : `Pronto: ${rr.nome}${typeof rr.estoque === "number" ? `, ${rr.estoque} em estoque, dá até ${rr.acaba_em}` : ""}.`;
+      return [[{ type: "text", text: txt }], "end_turn"];
+    }
+    if (res0.por_remedio) return [[{ type: "text", text: res0.faltas.length ? "Faltou: " + res0.faltas.map((f: any) => `${f.dia}: ${f.faltou.join(", ")}`).join("; ") : "Nenhuma falta." }], "end_turn"];
+    if (r0.is_error && /remedio|tomo/i.test(primeiroTexto)) return [[{ type: "text", text: "Não deu: " + r0.content }], "end_turn"];
+  }
+  if (Array.isArray(ultimaUser.content) && ultimaUser.content[0]?.type === "tool_result") {
+    const r = ultimaUser.content[0];
+    const res = JSON.parse(typeof r.content === "string" && r.content.startsWith("{") ? r.content : "{}");
+    if (/apaga/i.test(primeiroTexto) && res.eventos) {
+      const alvo = res.eventos.find((e: any) => /luz/i.test(e.titulo)) ?? res.eventos[0];
+      return [[{ type: "tool_use", id: "tu2", name: "remover_evento", input: { id: alvo.id } }], "tool_use"];
+    }
+    if (/loop/i.test(primeiroTexto)) return [[{ type: "tool_use", id: "tu" + Math.random(), name: "listar_eventos", input: { de: hojeK, ate: hojeK } }], "tool_use"];
+    if (/ignora/i.test(primeiroTexto)) return [[{ type: "text", text: "Erro visto: " + (r.is_error ? r.content : "nenhum") }], "end_turn"];
+    // Resposta em frase, como a IA de verdade faria.
+    const dm = (k: string) => k ? `${k.slice(8, 10)}/${k.slice(5, 7)}` : "";
+    const real = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+    let frase = "Pronto.";
+    if (r.is_error) frase = "Não deu: " + r.content;
+    else if (res.aguardando_confirmacao) frase = "Separei para apagar. Toque em Confirmar aqui embaixo, se estiver certo.";
+    else if (res.evento) frase = `Pronto: “${res.evento.titulo}” em ${dm(res.evento.data)}` + (res.evento.tipo === "conta" ? `, ${real(res.evento.valor)} (${res.evento.categoria})` : "") + (res.repete ? ", todo mês." : ".");
+    else if (res.eventos) {
+      const contas = res.eventos.filter((e: any) => e.tipo === "conta" && !e.pago);
+      const outros = res.eventos.filter((e: any) => e.tipo !== "conta");
+      frase = res.eventos.length ? [
+        outros.length ? "Hoje: " + outros.map((e: any) => (e.hora_inicio ? e.hora_inicio + " " : "") + e.titulo).join(", ") + "." : "",
+        contas.length ? `Contas a pagar: ${contas.map((e: any) => e.titulo + " " + real(e.valor)).join(", ")}.` : "",
+      ].filter(Boolean).join("\n") : "Nada hoje. Dia livre!";
+    }
+    return [[{ type: "thinking", thinking: "", signature: "x" }, { type: "text", text: frase }], "end_turn"];
+  }
+  if (/lento/i.test(primeiroTexto)) await new Promise((r) => setTimeout(r, 1500));
+  if (/recusa/i.test(primeiroTexto)) return [[], "refusal"];
+  // Foto: a IA de teste "lê" um boleto de luz. Desabafo ou outro assunto: fora_do_assunto.
+  const ultimaComImagem = Array.isArray(ultimaUser.content) && ultimaUser.content.some((c: any) => c.type === "image");
+  if (ultimaComImagem) return [[{ type: "tool_use", id: "tu1", name: "criar_evento", input: { titulo: "Conta de luz (da foto)", data: hojeK, tipo: "conta", valor: 213.77, categoria: "Casa" } }], "tool_use"];
+  if (/tomo remedix/i.test(primeiroTexto)) return [[{ type: "tool_use", id: "tr1", name: "cadastrar_remedio", input: { nome: "Remedix", dose: 1, unidade: "comprimido", horarios: ["manha", "noite"], estoque: 5 } }], "tool_use"];
+  if (/comprei/i.test(primeiroTexto)) return [[{ type: "tool_use", id: "tr1", name: "listar_remedios", input: {} }], "tool_use"];
+  if (/tomei/i.test(primeiroTexto)) return [[{ type: "tool_use", id: "tr1", name: "listar_remedios", input: {} }], "tool_use"];
+  if (/esqueci/i.test(primeiroTexto)) return [[{ type: "tool_use", id: "tr1", name: "relatorio_remedios", input: { de: "2026-11-01", ate: hojeK } }], "tool_use"];
+  if (/triste|conselho|piada|ansios|terapia|conversar/i.test(String(ultimaUser.content))) return [[{ type: "text", text: "Posso ajudar com isso!" }, { type: "tool_use", id: "tu1", name: "fora_do_assunto", input: { motivo: "conversa" } }], "tool_use"];
+  if (/hoje|apaga/i.test(primeiroTexto)) return [[{ type: "text", text: "Vou olhar." }, { type: "tool_use", id: "tu1", name: "listar_eventos", input: { de: hojeK, ate: hojeK } }], "tool_use"];
+  if (/luz de 150/i.test(primeiroTexto)) return [[{ type: "tool_use", id: "tu1", name: "criar_evento", input: { titulo: "Luz", data: "2026-12-15", tipo: "conta", valor: 150, categoria: "Casa", repetir: "mensal" } }], "tool_use"];
+  if (/conta de gas/i.test(primeiroTexto)) return [[{ type: "tool_use", id: "tu1", name: "criar_evento", input: { titulo: "Gás", data: hojeK, tipo: "conta", valor: 132.4, categoria: "Casa", repetir: "mensal" } }], "tool_use"];
+  if (/marca/i.test(primeiroTexto)) return [[{ type: "tool_use", id: "tu1", name: "criar_evento", input: { titulo: "Dentista", data: hojeK, hora: "15:00" } }], "tool_use"];
+  if (/ignora/i.test(primeiroTexto)) return [[{ type: "tool_use", id: "tu1", name: "editar_evento", input: { id: "ev3", titulo: "hackeado" } }], "tool_use"];
+  if (/loop/i.test(primeiroTexto)) return [[{ type: "tool_use", id: "tu" + Math.random(), name: "listar_eventos", input: { de: hojeK, ate: hojeK } }], "tool_use"];
+  return [[{ type: "text", text: "Oi! Em que posso ajudar na sua agenda?" }], "end_turn"];
+}
+
 const log: string[] = [];
 const pedidosIA: any[] = [];
+const pedidosOpenAI: any[] = [];
 createServer(async (req, res) => {
   const url = new URL(req.url!, "http://x");
   const p = url.pathname;
@@ -122,87 +200,51 @@ createServer(async (req, res) => {
   log.push(`${req.method} ${p}`);
 
 
-  // ----- Anthropic falsa (roteiro) -----
+  // ----- Anthropic falsa -----
   if (p.startsWith("/v1/messages")) {
     pedidosIA.push({ headers: { beta: req.headers["anthropic-beta"], chave: req.headers["x-api-key"] ?? req.headers.authorization }, corpo: b });
     if (req.headers["x-api-key"] !== "sk-ant-teste" && req.headers.authorization !== "Bearer sk-ant-teste") return j(401, { type: "error", error: { type: "authentication_error", message: "invalid x-api-key" } });
-    const msgs = b.messages;
-    const ultimaUser = [...msgs].reverse().find((m: any) => m.role === "user");
-    const primeiroTexto = [...msgs].reverse().find((m: any) => m.role === "user" && typeof m.content === "string")?.content ?? "";
-    const resp = (content: any[], stop: string) => j(200, { id: "msg_" + Date.now(), type: "message", role: "assistant", model: b.model, content, stop_reason: stop, usage: { input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 50 } });
-    const hojeK = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
-    // Botão "Ler da caixa": devolve os dados de uma caixa fictícia.
-    if (b.tool_choice?.name === "dados_da_caixa") return resp([{ type: "tool_use", id: "tc1", name: "dados_da_caixa", input: {
-      e_caixa_de_remedio: true, nome: "Remedix 50 mg", unidade: "comprimido", por_caixa: 30,
-      caixa: { principio: "Remedixina", concentracao: "50 mg", forma: "comprimido revestido", apresentacao: "caixa com 30 comprimidos",
-        laboratorio: "Laboratório Teste", lote: "AB123", validade: "2027-08", registro: "1.0000.0000.000-0", tarja: "vermelha", receita: "sob prescrição" },
-    } }], "tool_use");
-    if (Array.isArray(ultimaUser.content) && ultimaUser.content[0]?.type === "tool_result") {
-      const r0 = ultimaUser.content[0];
-      const res0 = JSON.parse(typeof r0.content === "string" && r0.content.startsWith("{") ? r0.content : "{}");
-      // Remédios: depois de listar, marca as doses da manhã; depois de cadastrar, pede a foto da caixa.
-      if (/tomei/i.test(primeiroTexto) && res0.doses_do_dia) {
-        const manha = res0.doses_do_dia.doses.filter((d: any) => d.horario === "manha" && !d.tomado);
-        if (manha.length) return resp(manha.map((d: any, i: number) => ({ type: "tool_use", id: "td" + i, name: "marcar_dose", input: { id: d.id, horario: "manha", tomado: true } })), "tool_use");
-        return resp([{ type: "text", text: "Os da manhã já estavam marcados." }], "end_turn");
-      }
-      if (res0.remedio) {
-        const rr = res0.remedio;
-        const txt = r0.is_error ? "Não deu: " + r0.content
-          : res0.lembrete ? `Anotei ${rr.nome}: ${rr.dose} ${rr.unidade}, ${rr.horarios.join(" e ")}. Manda uma foto da caixa que eu anoto o resto (concentração, laboratório, validade, quantidade na caixa).`
-          : `Pronto: ${rr.nome}${typeof rr.estoque === "number" ? `, ${rr.estoque} em estoque, dá até ${rr.acaba_em}` : ""}.`;
-        return resp([{ type: "text", text: txt }], "end_turn");
-      }
-      if (res0.por_remedio) return resp([{ type: "text", text: res0.faltas.length ? "Faltou: " + res0.faltas.map((f: any) => `${f.dia}: ${f.faltou.join(", ")}`).join("; ") : "Nenhuma falta." }], "end_turn");
-      if (r0.is_error && /remedio|tomo/i.test(primeiroTexto)) return resp([{ type: "text", text: "Não deu: " + r0.content }], "end_turn");
+    const [content, stop] = await roteiro(b);
+    return j(200, { id: "msg_" + Date.now(), type: "message", role: "assistant", model: b.model, content, stop_reason: stop, usage: { input_tokens: 100, output_tokens: 20, cache_read_input_tokens: 50 } });
+  }
+
+  // ----- API compatível com OpenAI falsa (AGENDA_IA=openai/gemini/ollama/compativel): traduz e usa o mesmo roteiro -----
+  if (p === "/v1/chat/completions") {
+    pedidosOpenAI.push(b);
+    if (req.headers.authorization !== "Bearer sk-teste-openai") return j(401, { error: { message: "Incorrect API key", type: "invalid_request_error" } });
+    if (!b.model || !Array.isArray(b.messages) || b.messages[0]?.role !== "system" || !Array.isArray(b.tools)) return j(400, { error: { message: "pedido malformado" } });
+    const msgs: any[] = [];
+    for (const m of b.messages.slice(1)) {
+      if (m.role === "tool") {
+        const r = { type: "tool_result", tool_use_id: m.tool_call_id, content: String(m.content).replace(/^ERRO: /, ""), ...(String(m.content).startsWith("ERRO: ") ? { is_error: true } : {}) };
+        const ult = msgs.at(-1);
+        if (ult?.role === "user" && Array.isArray(ult.content) && ult.content[0]?.type === "tool_result") ult.content.push(r);
+        else msgs.push({ role: "user", content: [r] });
+      } else if (m.role === "assistant") {
+        msgs.push({ role: "assistant", content: [
+          ...(m.content ? [{ type: "text", text: m.content }] : []),
+          ...(m.tool_calls ?? []).map((c: any) => ({ type: "tool_use", id: c.id, name: c.function.name, input: JSON.parse(c.function.arguments) })),
+        ] });
+      } else if (Array.isArray(m.content)) {
+        msgs.push({ role: m.role, content: m.content.map((c: any) => c.type === "image_url"
+          ? { type: "image", source: { type: "base64", media_type: c.image_url.url.slice(5, c.image_url.url.indexOf(";")), data: c.image_url.url.split(",")[1] } }
+          : c) });
+      } else msgs.push({ role: m.role, content: m.content });
     }
-    if (Array.isArray(ultimaUser.content) && ultimaUser.content[0]?.type === "tool_result") {
-      const r = ultimaUser.content[0];
-      const res = JSON.parse(typeof r.content === "string" && r.content.startsWith("{") ? r.content : "{}");
-      if (/apaga/i.test(primeiroTexto) && res.eventos) {
-        const alvo = res.eventos.find((e: any) => /luz/i.test(e.titulo)) ?? res.eventos[0];
-        return resp([{ type: "tool_use", id: "tu2", name: "remover_evento", input: { id: alvo.id } }], "tool_use");
-      }
-      if (/loop/i.test(primeiroTexto)) return resp([{ type: "tool_use", id: "tu" + Math.random(), name: "listar_eventos", input: { de: hojeK, ate: hojeK } }], "tool_use");
-      if (/ignora/i.test(primeiroTexto)) return resp([{ type: "text", text: "Erro visto: " + (r.is_error ? r.content : "nenhum") }], "end_turn");
-      // Resposta em frase, como a IA de verdade faria.
-      const dm = (k: string) => k ? `${k.slice(8, 10)}/${k.slice(5, 7)}` : "";
-      const real = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
-      let frase = "Pronto.";
-      if (r.is_error) frase = "Não deu: " + r.content;
-      else if (res.aguardando_confirmacao) frase = "Separei para apagar. Toque em Confirmar aqui embaixo, se estiver certo.";
-      else if (res.evento) frase = `Pronto: “${res.evento.titulo}” em ${dm(res.evento.data)}` + (res.evento.tipo === "conta" ? `, ${real(res.evento.valor)} (${res.evento.categoria})` : "") + (res.repete ? ", todo mês." : ".");
-      else if (res.eventos) {
-        const contas = res.eventos.filter((e: any) => e.tipo === "conta" && !e.pago);
-        const outros = res.eventos.filter((e: any) => e.tipo !== "conta");
-        frase = res.eventos.length ? [
-          outros.length ? "Hoje: " + outros.map((e: any) => (e.hora_inicio ? e.hora_inicio + " " : "") + e.titulo).join(", ") + "." : "",
-          contas.length ? `Contas a pagar: ${contas.map((e: any) => e.titulo + " " + real(e.valor)).join(", ")}.` : "",
-        ].filter(Boolean).join("\n") : "Nada hoje. Dia livre!";
-      }
-      return resp([{ type: "thinking", thinking: "", signature: "x" }, { type: "text", text: frase }], "end_turn");
-    }
-    if (/lento/i.test(primeiroTexto)) await new Promise((r) => setTimeout(r, 1500));
-    if (/recusa/i.test(primeiroTexto)) return resp([], "refusal");
-    // Foto: a IA de teste "lê" um boleto de luz. Desabafo ou outro assunto: fora_do_assunto.
-    const ultimaComImagem = Array.isArray(ultimaUser.content) && ultimaUser.content.some((c: any) => c.type === "image");
-    if (ultimaComImagem) return resp([{ type: "tool_use", id: "tu1", name: "criar_evento", input: { titulo: "Conta de luz (da foto)", data: hojeK, tipo: "conta", valor: 213.77, categoria: "Casa" } }], "tool_use");
-    if (/tomo remedix/i.test(primeiroTexto)) return resp([{ type: "tool_use", id: "tr1", name: "cadastrar_remedio", input: { nome: "Remedix", dose: 1, unidade: "comprimido", horarios: ["manha", "noite"], estoque: 5 } }], "tool_use");
-    if (/comprei/i.test(primeiroTexto)) return resp([{ type: "tool_use", id: "tr1", name: "listar_remedios", input: {} }], "tool_use");
-    if (/tomei/i.test(primeiroTexto)) return resp([{ type: "tool_use", id: "tr1", name: "listar_remedios", input: {} }], "tool_use");
-    if (/esqueci/i.test(primeiroTexto)) return resp([{ type: "tool_use", id: "tr1", name: "relatorio_remedios", input: { de: "2026-11-01", ate: hojeK } }], "tool_use");
-    if (/triste|conselho|piada|ansios|terapia|conversar/i.test(String(ultimaUser.content))) return resp([{ type: "text", text: "Posso ajudar com isso!" }, { type: "tool_use", id: "tu1", name: "fora_do_assunto", input: { motivo: "conversa" } }], "tool_use");
-    if (/hoje|apaga/i.test(primeiroTexto)) return resp([{ type: "text", text: "Vou olhar." }, { type: "tool_use", id: "tu1", name: "listar_eventos", input: { de: hojeK, ate: hojeK } }], "tool_use");
-    if (/luz de 150/i.test(primeiroTexto)) return resp([{ type: "tool_use", id: "tu1", name: "criar_evento", input: { titulo: "Luz", data: "2026-12-15", tipo: "conta", valor: 150, categoria: "Casa", repetir: "mensal" } }], "tool_use");
-    if (/conta de gas/i.test(primeiroTexto)) return resp([{ type: "tool_use", id: "tu1", name: "criar_evento", input: { titulo: "Gás", data: hojeK, tipo: "conta", valor: 132.4, categoria: "Casa", repetir: "mensal" } }], "tool_use");
-    if (/marca/i.test(primeiroTexto)) return resp([{ type: "tool_use", id: "tu1", name: "criar_evento", input: { titulo: "Dentista", data: hojeK, hora: "15:00" } }], "tool_use");
-    if (/ignora/i.test(primeiroTexto)) return resp([{ type: "tool_use", id: "tu1", name: "editar_evento", input: { id: "ev3", titulo: "hackeado" } }], "tool_use");
-    if (/loop/i.test(primeiroTexto)) return resp([{ type: "tool_use", id: "tu" + Math.random(), name: "listar_eventos", input: { de: hojeK, ate: hojeK } }], "tool_use");
-    return resp([{ type: "text", text: "Oi! Em que posso ajudar na sua agenda?" }], "end_turn");
+    const [content, stop] = await roteiro({ messages: msgs, model: b.model, tool_choice: b.tool_choice ? { name: b.tool_choice.function?.name } : undefined });
+    const textoR = content.filter((c: any) => c.type === "text").map((c: any) => c.text).join(" ");
+    const chamadas = content.filter((c: any) => c.type === "tool_use").map((c: any) => ({ id: "call_" + c.id, type: "function", function: { name: c.name, arguments: JSON.stringify(c.input) } }));
+    return j(200, {
+      id: "chatcmpl-teste", object: "chat.completion", model: b.model,
+      choices: [{ index: 0, finish_reason: stop === "tool_use" ? "tool_calls" : stop === "refusal" ? "content_filter" : "stop",
+        message: { role: "assistant", content: textoR || null, ...(chamadas.length ? { tool_calls: chamadas } : {}) } }],
+      usage: { prompt_tokens: 120, completion_tokens: 25 },
+    });
   }
 
   // ----- controle do teste -----
   if (p === "/teste/ia") return j(200, pedidosIA);
+  if (p === "/teste/openai") return j(200, pedidosOpenAI);
   if (p === "/teste/log") return j(200, { log, acessoPedidos, evs: [...evs.values()], excecoes: [...excecoes.entries()] });
   if (p === "/teste/reconectar") { reconectar = true; return j(200, {}); }
 

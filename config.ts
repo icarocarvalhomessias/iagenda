@@ -9,11 +9,11 @@ function lerArquivo(arq: string): string {
   try { return readFileSync(arq, "utf8").trim(); } catch { return ""; }
 }
 
-export function segredo(nome: string, credencial: string): string {
-  const valor = process.env[nome]?.trim();
+export function segredo(nome: string, credencial: string, env: NodeJS.ProcessEnv = process.env): string {
+  const valor = env[nome]?.trim();
   if (valor) return valor;
-  const arq = process.env[nome + "_ARQUIVO"];
+  const arq = env[nome + "_ARQUIVO"];
   if (arq) return lerArquivo(arq);
-  if (process.env.CREDENTIALS_DIRECTORY) return lerArquivo(join(process.env.CREDENTIALS_DIRECTORY, credencial));
+  if (env.CREDENTIALS_DIRECTORY) return lerArquivo(join(env.CREDENTIALS_DIRECTORY, credencial));
   return "";
 }

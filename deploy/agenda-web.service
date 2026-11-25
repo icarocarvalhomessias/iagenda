@@ -28,6 +28,7 @@ LoadCredential=chave-mestra:/etc/agenda-web/chave-mestra
 # Quem pode entrar, além dos convites feitos com `node admin.ts convidar` (* abre para qualquer conta Google).
 Environment=AGENDA_CONVITES=
 # Chave da API da Anthropic do chat. Sem ela, o chat fica desligado e a agenda segue.
+# Outro provedor (README, "IA do chat"): Environment=AGENDA_IA=openai, AGENDA_MODELO=... e LoadCredential=ia-chave:...
 LoadCredential=anthropic-chave:/etc/agenda-web/anthropic-chave
 # Modelo e esforço do chat (chat.ts). Para baratear: AGENDA_MODELO=claude-haiku-5-5.
 Environment=AGENDA_MODELO=claude-opus-5-5
@@ -36,7 +37,7 @@ Environment=AGENDA_CHAT_DIA=100
 StateDirectory=agenda-web
 StateDirectoryMode=0700
 # Pessoas, sessões, conversa do chat, remédios e avisos ficam em $STATE_DIRECTORY/agenda.db (SQLite).
-# Sem sudo e sem acesso ao resto do servidor: só lê o próprio código e fala com o Google e a Anthropic.
+# Sem sudo e sem acesso ao resto do servidor: só lê o próprio código e fala com o Google e a IA do chat.
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes

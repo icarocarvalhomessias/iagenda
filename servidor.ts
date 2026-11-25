@@ -34,7 +34,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
 import { ErroHttp, MIN, type Sessao, eu, fuso, partesNoFuso, listarEventos, criarEvento, editarEvento, apagarEvento, marcarFeito, idValido } from "./agenda.ts";
-import { chatConfigurado, audioConfigurado, conversa, enviar, confirmar, limparConversa, lerCaixa } from "./chat.ts";
+import { chatConfigurado, descricaoIA, audioConfigurado, conversa, enviar, confirmar, limparConversa, lerCaixa } from "./chat.ts";
 import * as avisos from "./push.ts";
 import * as remedios from "./remedios.ts";
 import * as fn from "./funcoes.ts";
@@ -386,4 +386,4 @@ avisos.iniciarRodada();
 
 createServer((req, res) => {
   rotas(req, res).catch((e) => { if (!res.headersSent) erro(res, e); else res.end(); });
-}).listen(PORTA, HOST, () => console.log(`IAgenda em http://${HOST}:${PORTA} (site: ${auth.SITE}; login: ${auth.loginConfigurado() ? "ok" : "falta AGENDA_GOOGLE_CLIENT_ID e AGENDA_GOOGLE_CLIENT_SECRET"}; demonstração: ${demo.DEMO ? "ligada" : "desligada"}; chat: ${chatConfigurado() ? "ligado" : "sem chave"}; áudio: ${audioConfigurado() ? "ligado" : "desligado"})`));
+}).listen(PORTA, HOST, () => console.log(`IAgenda em http://${HOST}:${PORTA} (site: ${auth.SITE}; login: ${auth.loginConfigurado() ? "ok" : "falta AGENDA_GOOGLE_CLIENT_ID e AGENDA_GOOGLE_CLIENT_SECRET"}; demonstração: ${demo.DEMO ? "ligada" : "desligada"}; chat: ${chatConfigurado() ? "" : "desligado, "}${descricaoIA()}; áudio: ${audioConfigurado() ? "ligado" : "desligado"})`));

@@ -9,9 +9,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const RAIZ = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const PORTA = 18091, FALSO = 18099;
-const SITE = `http://127.0.0.1:${PORTA}`, G = `http://127.0.0.1:${FALSO}`;
+const PORTA = 18091, PORTA_OPENAI = 18092, FALSO = 18099;
+const SITE = `http://127.0.0.1:${PORTA}`, SITE_OPENAI = `http://127.0.0.1:${PORTA_OPENAI}`, G = `http://127.0.0.1:${FALSO}`;
 const DADOS = mkdtempSync(join(tmpdir(), "iagenda-e2e-"));
+const DADOS_OPENAI = mkdtempSync(join(tmpdir(), "iagenda-e2e-openai-"));
 const filhos: ChildProcess[] = [];
 let saida = "";
 
@@ -29,29 +30,36 @@ async function esperar(url: string) {
   throw new Error(`não subiu: ${url}\n${saida}`);
 }
 
+const GOOGLE_FALSO = {
+  AGENDA_HOST: "127.0.0.1", AGENDA_CHAVE_MESTRA: Buffer.alloc(32, 9).toString("base64"),
+  AGENDA_GOOGLE_CLIENT_ID: "iagenda-teste.apps.googleusercontent.com", AGENDA_GOOGLE_CLIENT_SECRET: "segredo-de-teste",
+  AGENDA_GOOGLE_AUTH_URL: `${G}/o/oauth2/v2/auth`, AGENDA_GOOGLE_TOKEN_URL: `${G}/token`, AGENDA_GOOGLE_REVOKE_URL: `${G}/revoke`,
+  AGENDA_GOOGLE: `${G}/calendar/v3`, AGENDA_CONVITES: "fulana@gmail.com", AGENDA_WHISPER: "/nao/existe",
+};
 before(async () => {
   subir("teste/falso.ts", { FALSO_PORTA: String(FALSO) });
-  subir("servidor.ts", {
-    AGENDA_HOST: "127.0.0.1", AGENDA_PORTA: String(PORTA), AGENDA_SITE: SITE, AGENDA_DADOS: DADOS,
-    AGENDA_CHAVE_MESTRA: Buffer.alloc(32, 9).toString("base64"),
-    AGENDA_GOOGLE_CLIENT_ID: "iagenda-teste.apps.googleusercontent.com", AGENDA_GOOGLE_CLIENT_SECRET: "segredo-de-teste",
-    AGENDA_GOOGLE_AUTH_URL: `${G}/o/oauth2/v2/auth`, AGENDA_GOOGLE_TOKEN_URL: `${G}/token`, AGENDA_GOOGLE_REVOKE_URL: `${G}/revoke`,
-    AGENDA_GOOGLE: `${G}/calendar/v3`, AGENDA_ANTHROPIC_URL: G, AGENDA_ANTHROPIC_CHAVE: "sk-ant-teste",
-    AGENDA_CONVITES: "fulana@gmail.com", AGENDA_DEMO: "1", AGENDA_WHISPER: "/nao/existe",
-  });
+  // Com a Anthropic (falsa) e a demonstração ligada.
+  subir("servidor.ts", { ...GOOGLE_FALSO, AGENDA_PORTA: String(PORTA), AGENDA_SITE: SITE, AGENDA_DADOS: DADOS,
+    AGENDA_ANTHROPIC_URL: G, AGENDA_ANTHROPIC_CHAVE: "sk-ant-teste", AGENDA_DEMO: "1" });
+  // Com uma IA compatível com OpenAI (falsa), para conferir a tradução de ia.ts de ponta a ponta.
+  subir("servidor.ts", { ...GOOGLE_FALSO, AGENDA_PORTA: String(PORTA_OPENAI), AGENDA_SITE: SITE_OPENAI, AGENDA_DADOS: DADOS_OPENAI,
+    AGENDA_IA: "openai", AGENDA_IA_URL: `${G}/v1`, AGENDA_IA_CHAVE: "sk-teste-openai", AGENDA_MODELO: "modelo-teste" });
   await esperar(`${G}/teste/log`);
   await esperar(`${SITE}/saude`);
+  await esperar(`${SITE_OPENAI}/saude`);
 });
 after(() => {
   for (const p of filhos) p.kill();
-  try { rmSync(DADOS, { recursive: true, force: true }); } catch { /* Windows segura o arquivo por um instante */ }
+  for (const d of [DADOS, DADOS_OPENAI]) try { rmSync(d, { recursive: true, force: true }); } catch { /* Windows segura o arquivo por um instante */ }
 });
 
 // ---------- um "navegador" com cookies ----------
 class Navegador {
   cookies = new Map<string, string>();
+  site: string;
+  constructor(site = SITE) { this.site = site; }
   async ir(url: string, init: RequestInit = {}) {
-    const r = await fetch(url.startsWith("http") ? url : SITE + url, {
+    const r = await fetch(url.startsWith("http") ? url : this.site + url, {
       ...init, redirect: "manual",
       headers: { ...(init.headers as any), Cookie: [...this.cookies].map(([k, v]) => `${k}=${v}`).join("; ") },
     });
@@ -193,4 +201,38 @@ test("desconectar revoga no Google e apaga a pessoa", async () => {
   assert.ok(log.some((l) => l.startsWith("revoke ")));
   f.cookies.set("agenda", sessao!);
   assert.equal((await f.api("GET", "/app/eu")).status, 401);
+});
+
+test("IA compatível com OpenAI: ferramentas, foto, confirmação e leitura da caixa passam pela tradução", async () => {
+  const f = new Navegador(SITE_OPENAI);
+  assert.equal(await f.entrarComGoogle("fulana"), "/");
+  const oi = await f.api("POST", "/app/chat", { texto: "o que tenho hoje?" });
+  assert.equal(oi.status, 200, JSON.stringify(oi.j));
+  assert.match(oi.j.mensagens.at(-1).texto, /Hoje:.*Dentista/s);
+
+  // Foto: a IA "lê" um boleto e cria a conta.
+  const png = "data:image/png;base64," + Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]).toString("base64");
+  const foto = await f.api("POST", "/app/chat", { texto: "paga esse", imagem: png });
+  assert.match(foto.j.mensagens.at(-1).texto, /Conta de luz \(da foto\).*213,77/);
+  assert.equal(foto.j.mudou, true);
+
+  // Apagar pede confirmação; confirmando, apaga de verdade.
+  const apaga = await f.api("POST", "/app/chat", { texto: "apaga a luz" });
+  assert.ok(apaga.j.pendente?.id, JSON.stringify(apaga.j));
+  const sim = await f.api("POST", "/app/chat/confirmar", { id: apaga.j.pendente.id, sim: true });
+  assert.equal(sim.status, 200);
+
+  // Leitura da caixa: ferramenta obrigatória.
+  await f.api("POST", "/app/funcoes", { remedios: true });
+  const caixa = await f.api("POST", "/app/remedios/ler-caixa", { imagem: png });
+  assert.equal(caixa.j.nome, "Remedix 50 mg");
+  assert.equal(caixa.j.porCaixa, 30);
+
+  // O que chegou à API: formato do OpenAI, com o modelo, a chave e max_completion_tokens.
+  const pedidos = await (await fetch(`${G}/teste/openai`)).json() as any[];
+  assert.ok(pedidos.every((p) => p.model === "modelo-teste" && p.max_completion_tokens > 0 && !("max_tokens" in p)));
+  assert.ok(pedidos.some((p) => p.messages.some((m: any) => m.role === "tool")));
+  assert.ok(pedidos.some((p) => p.messages.some((m: any) => Array.isArray(m.content) && m.content.some((c: any) => c.type === "image_url" && c.image_url.url.startsWith("data:image/png;base64,")))));
+  assert.ok(pedidos.some((p) => p.tool_choice?.function?.name === "dados_da_caixa"));
+  assert.ok(pedidos[0].tools.every((t: any) => t.type === "function" && t.function.parameters?.type === "object"));
 });
