@@ -3,6 +3,9 @@
   "private": true,
   "type": "module",
   "description": "IAgenda: agenda Google com chat de IA, contas a pagar, remédios e avisos por push",
+  "license": "MIT",
+  "author": "Icaro Carvalho",
+  "repository": { "type": "git", "url": "git+https://github.com/icarocarvalhomessias/iagenda.git" },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.12.0"
   },
