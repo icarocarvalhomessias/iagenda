@@ -1,8 +1,9 @@
 // Login do Google (OAuth), Google Calendar e Anthropic FALSOS, com dados fictícios, para ver a IAgenda no computador
-// (node teste/local.ts sobe este e a IAgenda juntos). Nada aqui fala com serviço de verdade.
+// (npm run local sobe este e a IAgenda juntos). Nada aqui fala com serviço de verdade.
 import { createServer } from "node:http";
 import { createHash, randomBytes } from "node:crypto";
 
+const PORTA = Number(process.env.FALSO_PORTA ?? 8099);   // os testes automáticos usam outra, para não brigar com o npm run local
 export const CLIENT_ID = "iagenda-teste.apps.googleusercontent.com";
 export const CLIENT_SECRET = "segredo-de-teste";
 const ESCOPO_AGENDA = "https://www.googleapis.com/auth/calendar.events";
@@ -302,4 +303,4 @@ ${link("cancelar", "Cancelar")}`);
     }
   }
   j(404);
-}).listen(8099, "127.0.0.1", () => console.log("falso em 8099"));
+}).listen(PORTA, "127.0.0.1", () => console.log(`falso em ${PORTA}`));

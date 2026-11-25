@@ -35,7 +35,8 @@ O chat mexe em dados reais de outras pessoas, então boa parte do código é sob
 ## Stack
 
 - Node 22+ com TypeScript rodando direto (type stripping do Node), sem build.
-- `node:http`, `node:sqlite` e `node:crypto`; a única dependência é o SDK da Anthropic.
+- `node:http`, `node:sqlite` e `node:crypto`; a única dependência é o SDK da Anthropic. Para desenvolver, só `typescript` e `@types/node` (checagem de tipos).
+- Testes com o `node:test`, sem biblioteca.
 - Front-end em HTML, CSS e JavaScript puros (`publico/`).
 
 ## Arquivos
@@ -57,6 +58,8 @@ O chat mexe em dados reais de outras pessoas, então boa parte do código é sob
 | `config.ts` | Leitura dos segredos (variável, arquivo ou credencial do systemd) |
 | `publico/` | A página (agenda, chat, remédios) e a política de privacidade |
 | `teste/` | Servidor falso (login, Google e Anthropic) para rodar tudo no computador com dados fictícios |
+| `teste/auto/` | Testes automáticos (`npm test`) |
+| `.github/` | CI: testes, tipos, imagem Docker e procura de segredos |
 | `Dockerfile`, `docker-compose.yml`, `.env.example` | Hospedar com Docker |
 | `deploy/` | Caddyfile (HTTPS) e exemplo de serviço systemd |
 
@@ -66,10 +69,25 @@ Não precisa de conta Google nem de chave de API: o `teste/falso.ts` imita o log
 
 ```
 npm install
-npm run teste
+npm run local
 ```
 
 Depois abra <http://127.0.0.1:8091> (use `127.0.0.1`, não `localhost`) e clique em "Entrar com Google". A tela de login falsa deixa escolher cada caso: a pessoa convidada, alguém sem convite, quem desmarca a permissão da agenda e quem cancela. "Experimentar sem conta" abre o modo demonstração.
+
+## Testes
+
+```
+npm test         # 50 testes: unidade e de ponta a ponta
+npm run tipos    # checagem de tipos (TypeScript estrito), sem compilar nada
+```
+
+- **Unidade**: validação dos eventos e das contas, a agenda local (repetições, exceções, mês sem dia 31, horário de verão), avisos da hora, travas do chat, remédios (estoque, doses, relatório), sessões e o começo do login (PKCE, `state`).
+- **Ponta a ponta** (`teste/auto/servidor.test.ts`): sobe o `servidor.ts` de verdade com o `teste/falso.ts` em portas próprias e passa pelo login com Google (convidado, sem convite, sem a permissão da agenda, cancelado), cabeçalhos de segurança, proteção contra CSRF, criar e apagar na agenda, o chat com confirmação e a trava, a demonstração (sem nenhum pedido ao Google) e o desconectar (que revoga a autorização).
+- Nenhum teste fala com serviço de verdade nem precisa de chave.
+
+O GitHub Actions (`.github/workflows/testes.yml`) roda os testes e os tipos no Node 22 e 24, constrói a imagem Docker e confere o container subindo no modo demonstração, e procura segredos no histórico com o gitleaks.
+
+`teste/trava-ia.ts` é à parte: confere as travas do chat com a IA de verdade (gasta alguns centavos) e só roda à mão.
 
 ## Modo demonstração
 

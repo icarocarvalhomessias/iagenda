@@ -11,7 +11,13 @@
   },
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning servidor.ts",
-    "teste": "node --disable-warning=ExperimentalWarning teste/local.ts",
+    "local": "node --disable-warning=ExperimentalWarning teste/local.ts",
+    "test": "node --disable-warning=ExperimentalWarning --test teste/auto/*.test.ts",
+    "tipos": "tsc -p .",
     "admin": "node --disable-warning=ExperimentalWarning admin.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.7",
+    "typescript": "^5.9.3"
   }
 }

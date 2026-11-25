@@ -1,5 +1,5 @@
 // Sobe a IAgenda no computador com dados fictícios: o login do Google, o Google Calendar e a IA são o teste/falso.ts.
-// Uso: node teste/local.ts e abra http://127.0.0.1:8091 (use 127.0.0.1, não localhost: é o endereço de volta do login).
+// Uso: npm run local e abra http://127.0.0.1:8091 (use 127.0.0.1, não localhost: é o endereço de volta do login).
 // Os dados do teste (chat, avisos) ficam em teste/dados/, fora do git.
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";

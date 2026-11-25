@@ -83,7 +83,7 @@ export async function enviar(usuario: string, aviso: Aviso): Promise<number> {
           TTL: String(6 * 3600), Urgency: "high", "Content-Encoding": "aes128gcm", "Content-Type": "application/octet-stream",
           Authorization: `vapid t=${jwtVapid(s.endpoint)}, k=${VAPID.publica}`,
         },
-        body: cifrar(s, JSON.stringify(aviso)),
+        body: new Uint8Array(cifrar(s, JSON.stringify(aviso))),
         signal: AbortSignal.timeout(15_000),
       });
       if (r.status === 404 || r.status === 410) { db.prepare("DELETE FROM push_assinaturas WHERE endpoint = ?").run(s.endpoint); continue; }

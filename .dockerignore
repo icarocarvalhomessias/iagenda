@@ -7,3 +7,5 @@ teste
 deploy
 *.md
 *.log
+.github
+tsconfig.json

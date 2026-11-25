@@ -89,7 +89,7 @@ function json(res: ServerResponse, status: number, corpo: unknown, extra: Record
 
 function erro(res: ServerResponse, e: unknown) {
   if (e instanceof ErroHttp) {
-    const extra = e.codigo === "sessao" ? { "Set-Cookie": cookieSessao("", 0) } : {};
+    const extra: Record<string, string> = e.codigo === "sessao" ? { "Set-Cookie": cookieSessao("", 0) } : {};
     return json(res, e.status, { erro: e.codigo, mensagem: e.message !== e.codigo ? e.message : undefined }, extra);
   }
   console.error(e);

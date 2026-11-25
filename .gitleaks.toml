@@ -1,0 +1,7 @@
+# Procura de segredos (gitleaks, no CI). As regras padrão valem; só os valores falsos dos testes ficam de fora.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Valores falsos do teste/falso.ts e dos testes automáticos"
+regexes = ['''segredo-de-teste''', '''sk-ant-teste''', '''1//rt-''', '''google-at''']

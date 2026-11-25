@@ -1,0 +1,16 @@
+{
+  // Só para checar os tipos (npm run tipos); o Node roda os .ts direto, sem compilar.
+  "compilerOptions": {
+    "target": "es2023",
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": ["*.ts", "teste/**/*.ts"]
+}

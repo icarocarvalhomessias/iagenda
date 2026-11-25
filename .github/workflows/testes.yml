@@ -1,0 +1,64 @@
+# Testes, tipos, imagem Docker e procura de segredos, a cada push e pull request.
+name: testes
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  testes:
+    name: Testes (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run tipos
+      - run: npm test
+
+  docker:
+    name: Imagem Docker
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Construir
+        run: docker build -t iagenda .
+      - name: Subir e conferir (modo demonstração, sem nenhuma chave)
+        run: |
+          docker run -d --name iagenda -p 127.0.0.1:8091:8091 \
+            -e AGENDA_SITE=http://127.0.0.1:8091 -e AGENDA_DEMO=1 iagenda
+          for i in $(seq 1 30); do curl -fs http://127.0.0.1:8091/saude && break; sleep 1; done
+          curl -fs http://127.0.0.1:8091/modo | grep -q '"demo":true'
+          cookie=$(curl -s -o /dev/null -D - -X POST -H 'Sec-Fetch-Site: same-origin' http://127.0.0.1:8091/demo/entrar \
+            | grep -i '^set-cookie: agenda=' | sed 's/^[^:]*: //; s/;.*//' | tr -d '\r')
+          test -n "$cookie"
+          curl -fs -H "Cookie: $cookie" http://127.0.0.1:8091/app/eu | grep -q '"demo":true'
+          docker exec iagenda node admin.ts listar
+          test "$(docker exec iagenda id -u)" != "0"
+      - name: Log do container
+        if: always()
+        run: docker logs iagenda || true
+
+  segredos:
+    name: Procura de segredos
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
