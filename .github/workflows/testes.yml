@@ -18,8 +18,8 @@ jobs:
       matrix:
         node: [22, 24]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
           cache: npm
@@ -31,7 +31,7 @@ jobs:
     name: Imagem Docker
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Construir
         run: docker build -t iagenda .
       - name: Subir e conferir (modo demonstração, sem nenhuma chave)
@@ -56,9 +56,13 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: gitleaks/gitleaks-action@v2
+      # O binário oficial direto, no histórico inteiro (a action do gitleaks falha no primeiro push de um repositório).
+      - name: gitleaks no histórico inteiro
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSAO: 8.24.3
+        run: |
+          curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${VERSAO}/gitleaks_${VERSAO}_linux_x64.tar.gz" | tar xz gitleaks
+          ./gitleaks git --redact --verbose --exit-code 1 .
