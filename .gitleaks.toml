@@ -4,4 +4,4 @@ useDefault = true
 
 [allowlist]
 description = "Valores falsos do teste/falso.ts e dos testes automáticos"
-regexes = ['''segredo-de-teste''', '''sk-ant-teste''', '''1//rt-''', '''google-at''']
+regexes = ['''segredo-de-teste''', '''sk-ant-teste''', '''sk-teste-openai''', '''1//rt-''', '''google-at''']
