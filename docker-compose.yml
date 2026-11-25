@@ -1,0 +1,39 @@
+# IAgenda com Docker.
+#
+#   cp .env.example .env        (e preencha)
+#   docker compose up -d                       só a IAgenda, em http://127.0.0.1:8091
+#   docker compose --profile https up -d       com o Caddy na frente, HTTPS automático em AGENDA_DOMINIO
+#
+#   docker compose exec iagenda node admin.ts convidar fulana@gmail.com
+services:
+  iagenda:
+    build: .
+    image: iagenda
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "127.0.0.1:8091:8091"
+    volumes:
+      - iagenda-dados:/dados
+
+  caddy:
+    image: caddy:2
+    profiles: ["https"]
+    restart: unless-stopped
+    environment:
+      AGENDA_DOMINIO: ${AGENDA_DOMINIO:-localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-dados:/data
+      - caddy-config:/config
+    depends_on:
+      - iagenda
+
+volumes:
+  iagenda-dados:
+  caddy-dados:
+  caddy-config:

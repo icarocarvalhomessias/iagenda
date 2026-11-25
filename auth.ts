@@ -4,14 +4,16 @@
 //   GET /auth/google/retorno                  volta do Google: confere state, troca o code, abre a sessão
 //
 // - Só entra quem foi convidado (AGENDA_CONVITES ou `node admin.ts convidar e-mail`). AGENDA_CONVITES=* abre para todos.
-// - O refresh token do Google fica no SQLite, cifrado com AES-256-GCM pela chave mestra (AGENDA_CHAVE, LoadCredential
-//   chave-mestra ou, na falta, um arquivo gerado na pasta de dados). O access token fica só na memória.
+// - O refresh token do Google fica no SQLite, cifrado com AES-256-GCM pela chave mestra (AGENDA_CHAVE_MESTRA, ou
+//   _ARQUIVO, ou LoadCredential chave-mestra; na falta, um arquivo gerado na pasta de dados). O access token fica
+//   só na memória.
 // - A sessão é um valor aleatório num cookie HttpOnly; no banco fica só o hash dele.
 // - O navegador nunca vê nenhum token do Google.
 import { createCipheriv, createDecipheriv, createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { db, PASTA } from "./banco.ts";
+import { segredo } from "./config.ts";
 
 const MIN = 60_000;
 export const SITE = (process.env.AGENDA_SITE ?? "http://127.0.0.1:8091").replace(/\/$/, "");
@@ -26,25 +28,20 @@ export const SESSAO_DIAS = 30;
 const LOGIN_VALE = 10 * MIN;
 
 // ---------- configuração ----------
-function lerArquivo(env: string, credencial: string): string {
-  const arq = process.env[env] ?? (process.env.CREDENTIALS_DIRECTORY ? join(process.env.CREDENTIALS_DIRECTORY, credencial) : "");
-  if (!arq) return "";
-  try { return readFileSync(arq, "utf8").trim(); } catch { return ""; }
-}
-const CLIENT_ID = process.env.AGENDA_GOOGLE_CLIENT_ID ?? "";
-const CLIENT_SECRET = process.env.AGENDA_GOOGLE_CLIENT_SECRET ?? lerArquivo("AGENDA_GOOGLE_CLIENT_SECRET_ARQUIVO", "google-client-secret");
+const CLIENT_ID = process.env.AGENDA_GOOGLE_CLIENT_ID?.trim() ?? "";
+const CLIENT_SECRET = segredo("AGENDA_GOOGLE_CLIENT_SECRET", "google-client-secret");
 export const loginConfigurado = () => Boolean(CLIENT_ID && CLIENT_SECRET);
 
 // Chave mestra (32 bytes, em base64 ou hex). Sem ela, gera uma na pasta de dados: serve para testar, mas aí quem
 // copiar a pasta inteira leva o banco e a chave juntos. Em produção, guarde a chave fora da pasta de dados.
 const CHAVE = (() => {
-  const dada = lerArquivo("AGENDA_CHAVE", "chave-mestra");
+  const dada = segredo("AGENDA_CHAVE_MESTRA", "chave-mestra");
   const arq = join(PASTA, "chave-mestra");
   let t = dada;
   if (!t) {
     if (!existsSync(arq)) {
       writeFileSync(arq, randomBytes(32).toString("base64"), { mode: 0o600 });
-      console.warn(`Chave mestra gerada em ${arq}. Em produção, use AGENDA_CHAVE (ou LoadCredential chave-mestra) fora da pasta de dados.`);
+      console.warn(`Chave mestra gerada em ${arq}. Em produção, passe AGENDA_CHAVE_MESTRA (fora da pasta de dados).`);
     }
     t = readFileSync(arq, "utf8").trim();
   }

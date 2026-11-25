@@ -7,3 +7,4 @@ teste/dados/
 *.db
 *.db-*
 vapid.json
+!.env.example

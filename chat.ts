@@ -15,7 +15,7 @@
 // - Imagem (foto de boleto, print): uma por mensagem, só JPEG/PNG/WebP, conferida pelos bytes, e não fica
 //   guardada (só a marca de que houve imagem).
 import Anthropic from "@anthropic-ai/sdk";
-import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
@@ -27,6 +27,7 @@ import {
 import { db } from "./banco.ts";
 import * as remedios from "./remedios.ts";
 import * as fn from "./funcoes.ts";
+import { segredo } from "./config.ts";
 
 const MODELO = process.env.AGENDA_MODELO ?? "claude-opus-5-5";
 const ESFORCO = (process.env.AGENDA_ESFORCO ?? "low") as "low" | "medium" | "high";
@@ -45,13 +46,8 @@ const PENDENTE_VALE = 30 * 60_000;
 const LIMITES_POR_MSG = { criar: 5, editar: 5, marcar: 20, remover: 10, remedio: 20 };
 
 // ---------- chave e cliente ----------
-function lerChave(): string {
-  const arq = process.env.AGENDA_ANTHROPIC_CHAVE
-    ?? (process.env.CREDENTIALS_DIRECTORY ? join(process.env.CREDENTIALS_DIRECTORY, "anthropic-chave") : "");
-  if (!arq) return "";
-  try { return readFileSync(arq, "utf8").trim(); } catch { return ""; }
-}
-const CHAVE = lerChave();
+// AGENDA_ANTHROPIC_CHAVE (ou _ARQUIVO, ou LoadCredential anthropic-chave); na falta, o ANTHROPIC_API_KEY de sempre.
+const CHAVE = segredo("AGENDA_ANTHROPIC_CHAVE", "anthropic-chave") || process.env.ANTHROPIC_API_KEY?.trim() || "";
 const cliente = CHAVE
   ? new Anthropic({ apiKey: CHAVE, baseURL: process.env.AGENDA_ANTHROPIC_URL || undefined, maxRetries: 2, timeout: 90_000 })
   : null;
@@ -526,6 +522,10 @@ export function audioValido(v: unknown): Buffer | null {
   return b;
 }
 
+// Áudio só quando o whisper.cpp e o modelo existem (no Docker, por padrão, não): sem eles, o microfone some da tela.
+const FALSO = /\.(ts|js)$/.test(WHISPER);
+export const audioConfigurado = () => existsSync(WHISPER) && (FALSO || existsSync(WHISPER_MODELO));
+
 // Uma transcrição por vez no agenda-web (cada uma usa ~750 MB de memória).
 let filaWhisper: Promise<unknown> = Promise.resolve();
 function transcrever(wav: Buffer): Promise<string> {
@@ -534,7 +534,7 @@ function transcrever(wav: Buffer): Promise<string> {
     writeFileSync(arq, wav, { mode: 0o600 });
     const apagar = () => { try { unlinkSync(arq); } catch { /* já foi */ } };
     // AGENDA_WHISPER terminando em .ts/.js: um whisper falso, para o teste no notebook.
-    const [cmd, pre] = /\.(ts|js)$/.test(WHISPER) ? [process.execPath, [WHISPER]] : [WHISPER, []];
+    const [cmd, pre] = FALSO ? [process.execPath, [WHISPER]] : [WHISPER, []];
     const p = spawn(cmd, [...pre, "-m", WHISPER_MODELO, "-l", "pt", "-t", "2", "-nt", "-np", "-f", arq], { stdio: ["ignore", "pipe", "pipe"] });
     let saida = "", erro = "";
     const limite = setTimeout(() => p.kill("SIGTERM"), 3 * 60_000);
@@ -577,8 +577,9 @@ export async function enviar(s: Sessao, usuario: string, nome: string, textoBrut
   if (uso.fora >= LIMITE_FORA) throw new ErroHttp(429, "pausado", PAUSA);
   if (uso.n >= LIMITE_DIA) throw new ErroHttp(429, "limite-dia", `Chegou ao limite de ${LIMITE_DIA} mensagens por hoje. Amanhã tem mais; a agenda continua funcionando.`);
 
-  // Áudio: vira texto aqui (whisper na VPS) e segue o mesmo caminho de uma mensagem escrita, com as mesmas travas.
+  // Áudio: vira texto aqui (whisper no próprio servidor) e segue o mesmo caminho de uma mensagem escrita, com as mesmas travas.
   if (audio) {
+    if (!audioConfigurado()) throw new ErroHttp(400, "audio", "Aqui o áudio não está ligado. Pode escrever?");
     ocupados.add(usuario);
     let falado = "";
     try { falado = await transcrever(audio); }

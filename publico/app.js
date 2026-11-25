@@ -114,6 +114,8 @@ async function iniciar() {
   $('telaEntrar').hidden = true;
   $('telaAgenda').hidden = false;
   chatLigado = eu.chat !== false;
+  audioLigado = eu.audio === true;
+  botoesChat();
   if (eu.funcoes) funcoes = eu.funcoes;
   aplicarFuncoes();
   $('chatBtn').hidden = false;
@@ -954,6 +956,7 @@ async function desenharRemRel() {
 
 // ---------- chat ----------
 let chatLigado = true;
+let audioLigado = false;
 let chatCarregado = false;
 let pendenteId = null;
 const SUGESTOES = () => [
@@ -1039,7 +1042,7 @@ function botoesChat() {
   $('chatGravando').hidden = !gravandoAgora;
   $('chatTexto').hidden = gravandoAgora;
   $('chatFotoBtn').hidden = gravandoAgora;
-  $('chatMic').hidden = gravandoAgora || temAlgo;
+  $('chatMic').hidden = !audioLigado || gravandoAgora || temAlgo;
   $('chatEnviar').hidden = !gravandoAgora && !temAlgo;
   $('chatEnviar').disabled = enviando;
   $('chatMic').disabled = enviando;

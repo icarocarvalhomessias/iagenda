@@ -1,0 +1,6 @@
+# HTTPS automático (Let's Encrypt) para a IAgenda. O domínio vem de AGENDA_DOMINIO no .env.
+# O DNS do domínio precisa apontar para este servidor, com as portas 80 e 443 abertas.
+{$AGENDA_DOMINIO} {
+	encode zstd gzip
+	reverse_proxy iagenda:8091
+}

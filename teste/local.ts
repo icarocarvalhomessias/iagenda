@@ -2,14 +2,13 @@
 // Uso: node teste/local.ts e abra http://127.0.0.1:8091 (use 127.0.0.1, não localhost: é o endereço de volta do login).
 // Os dados do teste (chat, avisos) ficam em teste/dados/, fora do git.
 import { spawn } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const AQUI = dirname(fileURLToPath(import.meta.url));
 const DADOS = join(AQUI, "dados");
 mkdirSync(DADOS, { recursive: true });
-writeFileSync(join(DADOS, "chave.txt"), "sk-ant-teste");
 
 const filhos = [
   spawn(process.execPath, [join(AQUI, "falso.ts")], { stdio: "inherit" }),
@@ -18,7 +17,7 @@ const filhos = [
     cwd: join(AQUI, ".."),
     env: {
       ...process.env,
-      AGENDA_HOST: "127.0.0.1", AGENDA_PORTA: "8091", AGENDA_INSEGURO: "1",
+      AGENDA_HOST: "127.0.0.1", AGENDA_PORTA: "8091",
       AGENDA_SITE: "http://127.0.0.1:8091",
       // Login do Google falso (teste/falso.ts); só a Fulana é convidada.
       AGENDA_GOOGLE_CLIENT_ID: "iagenda-teste.apps.googleusercontent.com", AGENDA_GOOGLE_CLIENT_SECRET: "segredo-de-teste",
@@ -26,7 +25,7 @@ const filhos = [
       AGENDA_GOOGLE_REVOKE_URL: "http://127.0.0.1:8099/revoke", AGENDA_CONVITES: "fulana@gmail.com",
       AGENDA_GOOGLE: "http://127.0.0.1:8099/calendar/v3",
       AGENDA_ANTHROPIC_URL: "http://127.0.0.1:8099",
-      AGENDA_ANTHROPIC_CHAVE: join(DADOS, "chave.txt"),
+      AGENDA_ANTHROPIC_CHAVE: "sk-ant-teste",
       AGENDA_DADOS: DADOS, AGENDA_PUSH_TESTE: "1",
       AGENDA_WHISPER: join(AQUI, "whisper-falso.ts"),
       AGENDA_CHAT_DIA: "100",

@@ -50,8 +50,11 @@ O chat mexe em dados reais de outras pessoas, então boa parte do código é sob
 | `push.ts` | Web Push e a rodada de avisos a cada 5 minutos |
 | `funcoes.ts` | Funções ligadas e desligadas por pessoa |
 | `banco.ts` | SQLite |
+| `config.ts` | Leitura dos segredos (variável, arquivo ou credencial do systemd) |
 | `publico/` | A página (agenda, chat, remédios) e a política de privacidade |
 | `teste/` | Servidor falso (login, Google e Anthropic) para rodar tudo no computador com dados fictícios |
+| `Dockerfile`, `docker-compose.yml`, `.env.example` | Hospedar com Docker |
+| `deploy/` | Caddyfile (HTTPS) e exemplo de serviço systemd |
 
 ## Rodar no computador
 
@@ -59,16 +62,35 @@ Não precisa de conta Google nem de chave de API: o `teste/falso.ts` imita o log
 
 ```
 npm install
-node teste/local.ts
+npm run teste
 ```
 
 Depois abra <http://127.0.0.1:8091> (use `127.0.0.1`, não `localhost`) e clique em "Entrar com Google". A tela de login falsa deixa escolher cada caso: a pessoa convidada, alguém sem convite, quem desmarca a permissão da agenda e quem cancela.
+
+## Hospedar com Docker
+
+Precisa de um servidor com Docker, um domínio apontando para ele e um cliente OAuth do Google (próxima seção).
+
+```
+git clone https://github.com/<você>/iagenda.git && cd iagenda
+cp .env.example .env          # preencha: AGENDA_SITE, AGENDA_DOMINIO, o cliente do Google e a chave mestra
+docker compose --profile https up -d
+docker compose exec iagenda node admin.ts convidar fulana@gmail.com
+```
+
+O perfil `https` sobe o [Caddy](https://caddyserver.com/) na frente, com certificado automático para `AGENDA_DOMINIO`; nesse caso use `AGENDA_PROXY=1`. Sem o perfil, a IAgenda fica só em `http://127.0.0.1:8091`, para usar atrás do proxy que você já tem.
+
+- Os dados (pessoas, conversas, remédios, chaves dos avisos) ficam no volume `iagenda-dados`. Faça backup dele **e** da `AGENDA_CHAVE_MESTRA`, que fica no `.env`, fora do volume: sem ela, as autorizações guardadas não abrem e todo mundo precisa entrar de novo.
+- Atualizar: `git pull && docker compose --profile https up -d --build`.
+- O áudio do chat precisa do [whisper.cpp](https://github.com/ggml-org/whisper.cpp), que não vem na imagem. Sem ele, o botão do microfone não aparece e o resto funciona.
+
+Sem Docker, com Node 22.18 ou mais novo: `npm ci --omit=dev`, as mesmas variáveis do `.env.example` e `npm start`. Em `deploy/agenda-web.service` há um exemplo de serviço systemd, com os segredos por `LoadCredential`.
 
 ## Login com Google
 
 1. No [Google Cloud Console](https://console.cloud.google.com/), crie um projeto e ative a **Google Calendar API**.
 2. Em "Tela de consentimento OAuth", escolha o tipo externo e adicione os escopos `openid`, `email`, `profile` e `.../auth/calendar.events`. Publicado como "Em produção" sem verificação, o app aceita até 100 pessoas (com o aviso de "app não verificado"); em "Teste", o login vence a cada 7 dias.
-3. Em "Credenciais", crie um **ID do cliente OAuth** do tipo "Aplicativo da Web", com o URI de redirecionamento `https://SEU-DOMINIO/auth/google/retorno`.
+3. Em "Credenciais", crie um **ID do cliente OAuth** do tipo "Aplicativo da Web", com o URI de redirecionamento `https://SEU-DOMINIO/auth/google/retorno` (para testar no computador, também `http://127.0.0.1:8091/auth/google/retorno`).
 4. Configure `AGENDA_SITE`, `AGENDA_GOOGLE_CLIENT_ID` e o segredo do cliente (tabela abaixo).
 5. Convide quem pode entrar:
 
@@ -81,21 +103,24 @@ node admin.ts apagar fulana@gmail.com     # revoga no Google e apaga tudo da pes
 
 Ou use `AGENDA_CONVITES=fulana@gmail.com,beltrano@gmail.com` (`*` deixa qualquer conta Google entrar).
 
-Rode o `admin.ts` com as mesmas variáveis do servidor (pelo menos `AGENDA_DADOS` e `AGENDA_CHAVE`), para usar o mesmo banco.
+Rode o `admin.ts` com as mesmas variáveis do servidor (pelo menos `AGENDA_DADOS` e `AGENDA_CHAVE_MESTRA`), para usar o mesmo banco. No Docker, `docker compose exec iagenda node admin.ts ...` já faz isso.
 
 ## Variáveis de ambiente
 
+Os segredos (marcados com 🔑) aceitam três formas: o valor direto (`NOME=...`), um arquivo (`NOME_ARQUIVO=/run/secrets/...`) ou uma credencial do systemd (`LoadCredential`, nome entre parênteses).
+
 | Variável | Padrão | Para quê |
 |---|---|---|
-| `AGENDA_HOST`, `AGENDA_PORTA` | `127.0.0.1`, `8091` | Onde o servidor escuta |
-| `AGENDA_SITE` | `http://127.0.0.1:8091` | Endereço público (retorno do login e links dos avisos) |
+| `AGENDA_SITE` | `http://127.0.0.1:8091` | Endereço público: retorno do login e links dos avisos. Com `https://`, o cookie vai com `Secure` |
+| `AGENDA_HOST`, `AGENDA_PORTA` | `127.0.0.1`, `8091` | Onde o servidor escuta (`0.0.0.0` no Docker) |
+| `AGENDA_PROXY` | `0` | `1` atrás de proxy reverso: o IP do limite de pedidos vem do `X-Forwarded-For` |
 | `AGENDA_GOOGLE_CLIENT_ID` | | ID do cliente OAuth do Google |
-| `AGENDA_GOOGLE_CLIENT_SECRET` | | Segredo do cliente (ou o caminho em `AGENDA_GOOGLE_CLIENT_SECRET_ARQUIVO`, ou `LoadCredential=google-client-secret`) |
-| `AGENDA_CHAVE` | gerada em `dados/` | Caminho do arquivo com a chave mestra (32 bytes em base64 ou hex) que cifra os refresh tokens. Em produção, deixe fora da pasta de dados (ou `LoadCredential=chave-mestra`) |
+| `AGENDA_GOOGLE_CLIENT_SECRET` 🔑 | | Segredo do cliente (`google-client-secret`) |
+| `AGENDA_CHAVE_MESTRA` 🔑 | gerada em `dados/` | 32 bytes em base64 ou hex (`openssl rand -base64 32`) que cifram as autorizações do Google. Em produção, sempre fora da pasta de dados (`chave-mestra`) |
 | `AGENDA_CONVITES` | | E-mails liberados, separados por vírgula (`*` para todos), além dos de `admin.ts convidar` |
-| `AGENDA_ANTHROPIC_CHAVE` | | Arquivo com a chave da API da Anthropic. Sem ela, o chat fica desligado |
+| `AGENDA_ANTHROPIC_CHAVE` 🔑 | `ANTHROPIC_API_KEY` | Chave da API da Anthropic (`anthropic-chave`). Sem ela, o chat fica desligado |
 | `AGENDA_MODELO`, `AGENDA_ESFORCO` | `claude-opus-5-5`, `low` | Modelo e esforço do chat |
 | `AGENDA_CHAT_DIA` | `100` | Mensagens por pessoa por dia |
-| `AGENDA_WHISPER`, `AGENDA_WHISPER_MODELO` | | whisper.cpp para o áudio |
-| `AGENDA_DADOS` | `./dados` | Pasta do SQLite e das chaves VAPID (geradas na primeira vez) |
-| `AGENDA_INSEGURO=1` | | Cookie sem `Secure`, só para testar sem HTTPS |
+| `AGENDA_WHISPER`, `AGENDA_WHISPER_MODELO` | `/usr/local/bin/whisper-cli` | whisper.cpp e o modelo, para o áudio do chat |
+| `AGENDA_DADOS` | `./dados` | Pasta do SQLite e das chaves dos avisos (geradas na primeira vez) |
+| `AGENDA_INSEGURO` | pelo `AGENDA_SITE` | `1` força o cookie sem `Secure`; `0` força com |

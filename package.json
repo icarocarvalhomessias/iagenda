@@ -1,9 +1,17 @@
 {
-  "name": "agenda-web",
+  "name": "iagenda",
   "private": true,
   "type": "module",
   "description": "IAgenda: agenda Google com chat de IA, contas a pagar, remédios e avisos por push",
   "dependencies": {
     "@anthropic-ai/sdk": "^1.12.0"
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "start": "node --disable-warning=ExperimentalWarning servidor.ts",
+    "teste": "node --disable-warning=ExperimentalWarning teste/local.ts",
+    "admin": "node --disable-warning=ExperimentalWarning admin.ts"
   }
 }

@@ -32,7 +32,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
 import { ErroHttp, MIN, type Sessao, eu, esquecer, fuso, partesNoFuso, listarEventos, criarEvento, editarEvento, apagarEvento, marcarFeito, idValido } from "./agenda.ts";
-import { chatConfigurado, conversa, enviar, confirmar, limparConversa, lerCaixa } from "./chat.ts";
+import { chatConfigurado, audioConfigurado, conversa, enviar, confirmar, limparConversa, lerCaixa } from "./chat.ts";
 import * as avisos from "./push.ts";
 import * as remedios from "./remedios.ts";
 import * as fn from "./funcoes.ts";
@@ -42,8 +42,11 @@ import { fileURLToPath } from "node:url";
 
 const HOST = process.env.AGENDA_HOST ?? "127.0.0.1";
 const PORTA = Number(process.env.AGENDA_PORTA ?? 8091);
-// Sem HTTPS (teste no notebook), o cookie não pode ter Secure nem o prefixo __Host-.
-const SEGURO = process.env.AGENDA_INSEGURO !== "1";
+// Sem HTTPS (AGENDA_SITE com http://, teste no computador), o cookie não pode ter Secure nem o prefixo __Host-.
+const SEGURO = process.env.AGENDA_INSEGURO ? process.env.AGENDA_INSEGURO !== "1" : auth.SITE.startsWith("https://");
+// Atrás de um proxy reverso (Caddy, nginx), o IP de verdade vem em X-Forwarded-For. Sem proxy, esse cabeçalho vem
+// de quem pede e não vale para o limite por IP.
+const PROXY = process.env.AGENDA_PROXY === "1";
 const COOKIE = SEGURO ? "__Host-agenda" : "agenda";
 const COOKIE_LOGIN = SEGURO ? "__Host-agenda-login" : "agenda-login";
 const AQUI = dirname(fileURLToPath(import.meta.url));
@@ -193,7 +196,9 @@ async function rotas(req: IncomingMessage, res: ServerResponse) {
   const metodo = req.method ?? "GET";
 
   if ((metodo === "GET" || metodo === "HEAD") && ESTATICOS[caminho]) return estatico(res, ESTATICOS[caminho]);
-  const ip = String(req.headers["x-forwarded-for"] ?? req.socket.remoteAddress ?? "").split(",")[0].trim();
+  if (caminho === "/saude" && metodo === "GET") return json(res, 200, { ok: true });
+  const xff = PROXY ? String(req.headers["x-forwarded-for"] ?? "").split(",").at(-1)?.trim() : "";
+  const ip = xff || String(req.socket.remoteAddress ?? "");
 
   // ----- login com Google -----
   if (caminho === "/auth/google/start" && metodo === "GET") {
@@ -232,7 +237,7 @@ async function rotas(req: IncomingMessage, res: ServerResponse) {
 
   if (caminho === "/app/eu" && metodo === "GET") {
     const e = eu(s);
-    return json(res, 200, { nome: e.nome, email: e.email, chat: chatConfigurado(), funcoes: fn.funcoes(e.id) });
+    return json(res, 200, { nome: e.nome, email: e.email, chat: chatConfigurado(), audio: chatConfigurado() && audioConfigurado(), funcoes: fn.funcoes(e.id) });
   }
   if (caminho === "/app/funcoes" && metodo === "POST") {
     const e = await eu(s);
@@ -357,4 +362,4 @@ avisos.iniciarRodada();
 
 createServer((req, res) => {
   rotas(req, res).catch((e) => { if (!res.headersSent) erro(res, e); else res.end(); });
-}).listen(PORTA, HOST, () => console.log(`agenda-web em http://${HOST}:${PORTA} (login: ${auth.loginConfigurado() ? auth.RETORNO : "falta AGENDA_GOOGLE_CLIENT_ID e o segredo"}; chat: ${chatConfigurado() ? "ligado" : "sem chave"})`));
+}).listen(PORTA, HOST, () => console.log(`IAgenda em http://${HOST}:${PORTA} (site: ${auth.SITE}; login: ${auth.loginConfigurado() ? "ok" : "falta AGENDA_GOOGLE_CLIENT_ID e AGENDA_GOOGLE_CLIENT_SECRET"}; chat: ${chatConfigurado() ? "ligado" : "sem chave"}; áudio: ${audioConfigurado() ? "ligado" : "desligado"})`));

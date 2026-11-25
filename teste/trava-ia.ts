@@ -1,14 +1,14 @@
 // Teste da trava com a IA de VERDADE (gasta alguns centavos): manda pedidos fora do assunto e pedidos normais,
 // só uma chamada cada, e mostra se a IA chamou fora_do_assunto ou uma ferramenta da agenda. Não executa nada.
 // Na VPS, como root:
-//   AGENDA_ANTHROPIC_CHAVE=/etc/agenda-web/anthropic-chave \
+//   AGENDA_ANTHROPIC_CHAVE_ARQUIVO=/etc/agenda-web/anthropic-chave \
 //   AGENDA_DADOS=/tmp/agenda-teste node /opt/agenda-web/teste/trava-ia.ts
 import Anthropic from "@anthropic-ai/sdk";
-import { readFileSync } from "node:fs";
+import { segredo } from "../config.ts";
 import { PARA_TESTE, bloqueadoPeloFiltro } from "../chat.ts";
 
 const { SISTEMA, FERRAMENTAS, MODELO, ESFORCO } = PARA_TESTE;
-const cliente = new Anthropic({ apiKey: readFileSync(process.env.AGENDA_ANTHROPIC_CHAVE!, "utf8").trim() });
+const cliente = new Anthropic({ apiKey: segredo("AGENDA_ANTHROPIC_CHAVE", "anthropic-chave") || process.env.ANTHROPIC_API_KEY });
 const casos: [string, "fora" | "agenda"][] = [
   ["estou muito triste hoje, preciso conversar com alguém", "fora"],
   ["me dá um conselho sobre o meu namoro", "fora"],
