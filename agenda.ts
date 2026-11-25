@@ -1,6 +1,7 @@
 // agenda-web: o que fala com a agenda Google da pessoa. Usado pela página (servidor.ts), pelo chat (chat.ts)
 // e pelos avisos (push.ts), para os três mexerem na agenda do mesmo jeito e com as mesmas conferências.
-import { acessoGoogle as pedirAcesso, ErroAcesso, esquecerAcesso, usuario } from "./auth.ts";
+import { acessoGoogle as pedirAcesso, ErroAcesso, esquecerAcesso, usuario, ehDemo } from "./auth.ts";
+import { calendarioLocal, ErroLimite } from "./calendario-local.ts";
 
 const GOOGLE = (process.env.AGENDA_GOOGLE ?? "https://www.googleapis.com/calendar/v3").replace(/\/$/, "");
 const FUSO_PADRAO = "America/Sao_Paulo";
@@ -44,8 +45,16 @@ setInterval(() => {
 
 // ---------- Google Calendar ----------
 export async function google(s: Sessao, metodo: string, caminho: string, corpo?: unknown): Promise<any> {
-  const token = await acessoGoogle(s);
   let r: Response;
+  // Pessoa do modo demonstração: a agenda é a daqui (calendario-local.ts), nunca a do Google.
+  if (ehDemo(s.usuario)) {
+    let x;
+    try { x = calendarioLocal(s.usuario, metodo, caminho, corpo, FUSO_PADRAO); }
+    catch (e) { if (e instanceof ErroLimite) throw new ErroHttp(400, "limite", "Na demonstração, a agenda guarda até 300 eventos."); throw e; }
+    r = new Response(x.status === 204 || x.corpo === undefined ? null : JSON.stringify(x.corpo), { status: x.status });
+    return tratar(s, metodo, caminho, r);
+  }
+  const token = await acessoGoogle(s);
   try {
     r = await fetch(GOOGLE + caminho, {
       method: metodo,
@@ -57,6 +66,9 @@ export async function google(s: Sessao, metodo: string, caminho: string, corpo?:
     console.error("Google fora do ar:", (e as Error).message);
     throw new ErroHttp(502, "google");
   }
+  return tratar(s, metodo, caminho, r);
+}
+async function tratar(s: Sessao, metodo: string, caminho: string, r: Response): Promise<any> {
   if (r.status === 401) { esquecerAcesso(s.usuario); throw new ErroHttp(502, "google", "O Google recusou o acesso agora. Tente de novo."); }
   if (r.status === 403) throw new ErroHttp(403, "proibido", "O Google não deixou mexer nesse evento (é de outra pessoa?).");
   if (r.status === 404 || r.status === 410) throw new ErroHttp(404, "sumiu", "Esse evento não existe mais na sua agenda.");

@@ -16,7 +16,12 @@ const ERROS = {
   encerrado: 'O seu acesso foi encerrado. Fale com quem cuida desta IAgenda se isso for engano.',
   saiu: 'Você saiu. Até a próxima!',
   desconectado: 'Pronto: a IAgenda não tem mais acesso à sua agenda Google.',
+  'demo-saiu': 'Pronto: a sua demonstração foi apagada. Volte quando quiser.',
+  'demo-lotada': 'A demonstração está cheia agora. Tente de novo mais tarde.',
+  'demo-desligada': 'A demonstração não está ligada aqui.',
+  devagar: 'Muitas tentativas seguidas. Espere um minuto e tente de novo.',
 };
+let ehDemo = false;
 
 const $ = (id) => document.getElementById(id);
 function el(tag, cls, texto) {
@@ -85,7 +90,18 @@ function mostrarEntrar(codErro) {
   const p = $('entrarErro');
   p.hidden = !codErro;
   p.textContent = codErro ? (ERROS[codErro] || ERROS.falhou) : '';
-  p.className = 'alert ' + (codErro === 'saiu' || codErro === 'desconectado' ? 'amber' : 'red');
+  p.className = 'alert ' + (['saiu', 'desconectado', 'demo-saiu'].includes(codErro) ? 'amber' : 'red');
+  prepararEntrar();
+}
+// O que a tela de entrar oferece: Google (se o login estiver configurado) e/ou a demonstração.
+async function prepararEntrar() {
+  let m = { google: true, demo: false };
+  try { const r = await fetch('/modo'); if (r.ok) m = await r.json(); } catch { /* fica o Google */ }
+  $('entrarBtn').hidden = !m.google && m.demo;
+  $('entrarNota').hidden = $('entrarBtn').hidden;
+  $('demoForm').hidden = !m.demo;
+  $('demoNota').hidden = !m.demo;
+  if (m.demoHoras) $('demoHoras').textContent = m.demoHoras;
 }
 function pedirReconectar() {
   const a = $('aviso');
@@ -110,6 +126,14 @@ async function iniciar() {
   catch (e) { if (e.codigo !== 'sessao' && e.codigo !== 'convite') mostrarEntrar('falhou'); return; }
   $('euNome').textContent = eu.nome || 'Você';
   $('euEmail').textContent = eu.email;
+  ehDemo = eu.demo === true;
+  if (ehDemo) {
+    $('euEmail').textContent = 'demonstração';
+    $('demoFaixa').textContent = `Demonstração: tudo aqui é fictício e some em ${eu.demoHoras || 24} horas. Nada vai para o Google. Mexa à vontade, inclusive pelo chat.`;
+    $('sairNome').textContent = 'Sair e apagar a demonstração';
+  }
+  $('demoFaixa').hidden = !ehDemo;
+  $('desconectarBtn').hidden = ehDemo;
   $('inicial').textContent = (eu.nome || eu.email || '?').trim().charAt(0).toUpperCase();
   $('telaEntrar').hidden = true;
   $('telaAgenda').hidden = false;
@@ -1467,7 +1491,7 @@ document.addEventListener('DOMContentLoaded', () => {
   $('sairBtn').addEventListener('click', async () => {
     await esquecerAparelho();
     await api('POST', '/app/sair').catch(() => {});
-    mostrarEntrar('saiu');
+    mostrarEntrar(ehDemo ? 'demo-saiu' : 'saiu');
   });
   $('desconectarBtn').addEventListener('click', () => { document.querySelector('.menu').open = false; $('dlgDesconectar').showModal(); });
   $('descCancelar').addEventListener('click', () => $('dlgDesconectar').close());

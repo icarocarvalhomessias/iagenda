@@ -100,16 +100,17 @@ export function listar() {
   return {
     env: CONVITES_ENV,
     convites: (db.prepare("SELECT email, criado FROM convites ORDER BY email").all() as any[]),
-    usuarios: (db.prepare("SELECT id, email, nome, ultimo_login, refresh IS NOT NULL AS conectado FROM usuarios ORDER BY email").all() as any[]),
+    usuarios: (db.prepare("SELECT id, email, nome, ultimo_login, refresh IS NOT NULL AS conectado FROM usuarios WHERE google_sub NOT LIKE 'demo:%' ORDER BY email").all() as any[]),
+    visitantes: contarVisitantes(),
   };
 }
 
 // ---------- sessões ----------
-export function abrirSessao(usuario: string): string {
+export function abrirSessao(usuario: string, duracao = SESSAO_DIAS * 24 * 3600_000): string {
   const valor = randomBytes(32).toString("base64url");
   const agora = Date.now();
   db.prepare("INSERT INTO sessoes (hash, usuario, criada, expira) VALUES (?, ?, ?, ?)")
-    .run(hash(valor), usuario, agora, agora + SESSAO_DIAS * 24 * 3600_000);
+    .run(hash(valor), usuario, agora, agora + duracao);
   return valor;
 }
 export function lerSessao(valor: string): Usuario | null {
@@ -120,6 +121,27 @@ export function lerSessao(valor: string): Usuario | null {
 }
 export function fecharSessao(valor: string) { db.prepare("DELETE FROM sessoes WHERE hash = ?").run(hash(valor)); }
 setInterval(() => { db.prepare("DELETE FROM sessoes WHERE expira < ?").run(Date.now()); }, 60 * MIN).unref();
+
+// ---------- visitantes do modo demonstração (demo.ts) ----------
+// Sem conta Google: google_sub "demo:<aleatório>", sem refresh token. agenda.ts manda a agenda deles para
+// calendario-local.ts, e nada deles chega ao Google.
+const PREFIXO_DEMO = "demo:";
+export function criarVisitante(nome: string): string {
+  const id = randomBytes(16).toString("hex");
+  const agora = Date.now();
+  db.prepare("INSERT INTO usuarios (id, google_sub, email, nome, refresh, criado, ultimo_login) VALUES (?, ?, ?, ?, NULL, ?, ?)")
+    .run(id, PREFIXO_DEMO + randomBytes(12).toString("hex"), "visitante@demonstracao", nome, agora, agora);
+  return id;
+}
+export function ehDemo(id: string): boolean {
+  const l = db.prepare("SELECT google_sub FROM usuarios WHERE id = ?").get(id) as any;
+  return Boolean(l && String(l.google_sub).startsWith(PREFIXO_DEMO));
+}
+// Visitantes criados antes de "antes" (ms).
+export function visitantesAntigos(antes: number): string[] {
+  return (db.prepare("SELECT id FROM usuarios WHERE google_sub LIKE 'demo:%' AND criado < ?").all(antes) as any[]).map((l) => l.id);
+}
+export const contarVisitantes = () => (db.prepare("SELECT count(*) n FROM usuarios WHERE google_sub LIKE 'demo:%'").get() as any).n as number;
 
 export function usuario(id: string): Usuario | null {
   const l = db.prepare("SELECT id, email, nome FROM usuarios WHERE id = ?").get(id) as any;

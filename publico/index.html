@@ -25,11 +25,15 @@
     <h1>IAgenda</h1>
     <p>Sua agenda do Google, com lembretes e um jeito simples de marcar o que já fez.</p>
     <p id="entrarErro" class="alert red" role="alert" hidden></p>
-    <a id="entrarBtn" class="google-btn" href="/auth/google/start">
+    <a id="entrarBtn" class="google-btn" href="/auth/google/start" hidden>
       <svg viewBox="0 0 48 48" width="20" height="20" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.6l6.7-6.7C35.6 2.4 30.2 0 24 0 14.6 0 6.6 5.4 2.6 13.3l7.8 6C12.3 13.6 17.6 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.6c0-1.6-.1-3.1-.4-4.6H24v9h12.4c-.5 2.9-2.2 5.3-4.6 6.9l7.4 5.8c4.3-4 6.9-9.9 6.9-17.1z"/><path fill="#FBBC05" d="M10.4 28.7c-.5-1.4-.8-3-.8-4.7s.3-3.2.8-4.7l-7.8-6C.9 16.6 0 20.2 0 24s.9 7.4 2.6 10.7l7.8-6z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.8-5.8l-7.4-5.8c-2.1 1.4-4.8 2.3-8.4 2.3-6.4 0-11.7-4.1-13.6-9.8l-7.8 6C6.6 42.6 14.6 48 24 48z"/></svg>
       Entrar com Google
     </a>
-    <p class="note">Só para convidados. Ao entrar, você deixa a IAgenda ver e mudar os eventos da sua agenda Google. <a href="/privacidade">Privacidade</a></p>
+    <p id="entrarNota" class="note" hidden>Só para convidados. Ao entrar, você deixa a IAgenda ver e mudar os eventos da sua agenda Google. <a href="/privacidade">Privacidade</a></p>
+    <form id="demoForm" method="post" action="/demo/entrar" hidden>
+      <button class="demo-btn" type="submit">Experimentar sem conta</button>
+    </form>
+    <p id="demoNota" class="note" hidden>Uma agenda de exemplo, com contas, compromissos e remédios fictícios, só sua e apagada em <span id="demoHoras">24</span> horas. Nada vai para o Google.</p>
   </div>
 </main>
 
@@ -79,13 +83,14 @@
           </button>
           <div class="menu-sec">Conta</div>
           <a class="menu-item" href="/privacidade"><span class="mi-ic" aria-hidden="true">🔒</span><span class="mi-nome">Privacidade</span></a>
-          <button type="button" class="menu-item" id="sairBtn"><span class="mi-ic" aria-hidden="true">↩</span><span class="mi-nome">Sair</span></button>
+          <button type="button" class="menu-item" id="sairBtn"><span class="mi-ic" aria-hidden="true">↩</span><span class="mi-nome" id="sairNome">Sair</span></button>
           <button type="button" class="menu-item perigo" id="desconectarBtn"><span class="mi-ic" aria-hidden="true">⏏</span><span class="mi-nome">Sair e desconectar o Google</span></button>
         </div>
       </details>
     </div>
   </header>
 
+  <p id="demoFaixa" class="alert amber faixa" hidden></p>
   <p id="aviso" class="alert amber faixa" role="status" hidden></p>
 
   <div class="layout">

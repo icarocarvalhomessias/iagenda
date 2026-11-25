@@ -28,11 +28,16 @@ import { db } from "./banco.ts";
 import * as remedios from "./remedios.ts";
 import * as fn from "./funcoes.ts";
 import { segredo } from "./config.ts";
+import { ehDemo } from "./auth.ts";
 
 const MODELO = process.env.AGENDA_MODELO ?? "claude-opus-5-5";
 const ESFORCO = (process.env.AGENDA_ESFORCO ?? "low") as "low" | "medium" | "high";
 const LIMITE_DIA = Number(process.env.AGENDA_CHAT_DIA ?? 100);      // mensagens por pessoa por dia (só convidados usam)
 const LIMITE_FORA = Number(process.env.AGENDA_CHAT_FORA ?? 3);      // pedidos fora do assunto por dia, antes de pausar
+// Modo demonstração (demo.ts): menos mensagens por visitante e um teto do dia para todos os visitantes juntos,
+// porque cada mensagem custa na chave da API de quem hospeda.
+const DEMO_DIA = Number(process.env.AGENDA_DEMO_CHAT_DIA ?? 15);
+const DEMO_TOTAL = Number(process.env.AGENDA_DEMO_CHAT_TOTAL ?? 300);
 const TEXTO_MAX = 600;                                                // letras por mensagem
 const IMAGEM_MAX = 4_500_000;                                         // bytes da imagem (já reduzida no aparelho)
 const AUDIO_SEG_MAX = 125;                                            // segundos de áudio (o aparelho para em 120)
@@ -59,6 +64,7 @@ db.exec(`
     texto TEXT NOT NULL, quando INTEGER NOT NULL, erro INTEGER NOT NULL DEFAULT 0);
   CREATE INDEX IF NOT EXISTS mensagens_usuario ON mensagens (usuario, id);
   CREATE TABLE IF NOT EXISTS pendentes (usuario TEXT PRIMARY KEY, id TEXT NOT NULL, acoes TEXT NOT NULL, criado INTEGER NOT NULL);
+  CREATE TABLE IF NOT EXISTS demo_uso (dia TEXT PRIMARY KEY, n INTEGER NOT NULL);
   CREATE TABLE IF NOT EXISTS uso (usuario TEXT NOT NULL, dia TEXT NOT NULL, n INTEGER NOT NULL DEFAULT 0,
     entrada INTEGER NOT NULL DEFAULT 0, saida INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (usuario, dia));
 `);
@@ -102,6 +108,17 @@ function contarUso(usuario: string, entrada: number, saida: number, fora = false
     ON CONFLICT (usuario, dia) DO UPDATE SET n = n + 1, entrada = entrada + excluded.entrada, saida = saida + excluded.saida,
       fora = fora + excluded.fora`)
     .run(usuario, hoje(), entrada, saida, fora ? 1 : 0);
+  if (entrada > 0 && ehDemo(usuario)) db.prepare("INSERT INTO demo_uso (dia, n) VALUES (?, 1) ON CONFLICT (dia) DO UPDATE SET n = n + 1").run(hoje());
+}
+const limiteDia = (usuario: string) => (ehDemo(usuario) ? DEMO_DIA : LIMITE_DIA);
+// Limite do dia (da pessoa e, na demonstração, de todos os visitantes): erro 429 quando acabou.
+function conferirLimite(usuario: string, n: number) {
+  const lim = limiteDia(usuario);
+  if (n >= lim) throw new ErroHttp(429, "limite-dia", ehDemo(usuario)
+    ? `A demonstração permite ${lim} mensagens por visitante. A agenda continua funcionando.`
+    : `Chegou ao limite de ${lim} mensagens por hoje. Amanhã tem mais; a agenda continua funcionando.`);
+  if (ehDemo(usuario) && ((db.prepare("SELECT n FROM demo_uso WHERE dia = ?").get(hoje()) as any)?.n ?? 0) >= DEMO_TOTAL)
+    throw new ErroHttp(429, "limite-dia", "O chat da demonstração já conversou demais por hoje. Amanhã ele volta; a agenda continua funcionando.");
 }
 function usoHoje(usuario: string): { n: number; fora: number } {
   const l = db.prepare("SELECT n, fora FROM uso WHERE usuario = ? AND dia = ?").get(usuario, hoje()) as any;
@@ -112,7 +129,7 @@ export function conversa(usuario: string) {
   const u = usoHoje(usuario);
   return {
     mensagens: ultimas(usuario, 60), pendente: pendenteParaTela(lerPendente(usuario)), ligado: chatConfigurado(),
-    restantes: Math.max(0, LIMITE_DIA - u.n), pausado: u.fora >= LIMITE_FORA, textoMax: TEXTO_MAX,
+    restantes: Math.max(0, limiteDia(usuario) - u.n), pausado: u.fora >= LIMITE_FORA, textoMax: TEXTO_MAX,
   };
 }
 // Limpar (🗑) apaga as mensagens, mas não a contagem do dia: senão limpar zeraria o limite e a pausa.
@@ -575,7 +592,7 @@ export async function enviar(s: Sessao, usuario: string, nome: string, textoBrut
   if (ocupados.has(usuario)) throw new ErroHttp(409, "ocupado", "Ainda estou respondendo a anterior.");
   const uso = usoHoje(usuario);
   if (uso.fora >= LIMITE_FORA) throw new ErroHttp(429, "pausado", PAUSA);
-  if (uso.n >= LIMITE_DIA) throw new ErroHttp(429, "limite-dia", `Chegou ao limite de ${LIMITE_DIA} mensagens por hoje. Amanhã tem mais; a agenda continua funcionando.`);
+  conferirLimite(usuario, uso.n);
 
   // Áudio: vira texto aqui (whisper no próprio servidor) e segue o mesmo caminho de uma mensagem escrita, com as mesmas travas.
   if (audio) {
@@ -745,7 +762,8 @@ export async function lerCaixa(usuario: string, imagemBruta: unknown) {
   if (!imagem) throw new ErroHttp(400, "imagem", "Falta a foto da caixa.");
   if (ocupados.has(usuario)) throw new ErroHttp(409, "ocupado", "Ainda estou respondendo a anterior.");
   const uso = usoHoje(usuario);
-  if (uso.n >= LIMITE_DIA || uso.fora >= LIMITE_FORA) throw new ErroHttp(429, "limite-dia", "Por hoje acabou o limite do chat. Preencha à mão.");
+  if (uso.fora >= LIMITE_FORA) throw new ErroHttp(429, "limite-dia", "Por hoje acabou o limite do chat. Preencha à mão.");
+  conferirLimite(usuario, uso.n);
   ocupados.add(usuario);
   let entrada = 0, saida = 0;
   try {

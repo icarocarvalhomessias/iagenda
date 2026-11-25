@@ -38,6 +38,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .entrar-card > p:not(.note) { color: var(--muted); }
 .google-btn { display: inline-flex; align-items: center; gap: 10px; background: #fff; color: #1f1f1f; border: 1px solid #747775; border-radius: 999px; padding: 10px 22px; font-weight: 700; text-decoration: none; }
 .google-btn:hover { background: #f2f2f2; }
+.demo-btn { font: inherit; font-weight: 700; cursor: pointer; background: var(--c); color: var(--on-solid); border: 0; border-radius: 999px; padding: 11px 24px; }
+.demo-btn:hover { opacity: .88; }
+#demoForm { margin: 0; }
 
 /* barra */
 .bar-top {

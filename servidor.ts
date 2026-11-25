@@ -5,6 +5,8 @@
 //   /privacidade            política de privacidade
 //   GET  /auth/google/start     manda para o Google (?consentir=true pede o consentimento de novo)
 //   GET  /auth/google/retorno   volta do Google, abre a sessão (cookie HttpOnly) e manda para /
+//   POST /demo/entrar       com AGENDA_DEMO=1: entra como visitante, com uma agenda fictícia (demo.ts)
+//   GET  /modo              { google, demo }: o que a tela de entrar mostra
 //   GET  /app/eu            nome e e-mail de quem está logado
 //   GET  /app/eventos       ?de=ISO&ate=ISO: eventos da agenda principal (primary) da pessoa, no máximo 62 dias
 //   GET  /app/contas        ?de=ISO&ate=ISO: só as contas a pagar (eventos com icarusTipo=conta), no máximo 125 dias
@@ -31,12 +33,14 @@
 // escutando só atrás do proxy reverso.
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { readFileSync } from "node:fs";
-import { ErroHttp, MIN, type Sessao, eu, esquecer, fuso, partesNoFuso, listarEventos, criarEvento, editarEvento, apagarEvento, marcarFeito, idValido } from "./agenda.ts";
+import { ErroHttp, MIN, type Sessao, eu, fuso, partesNoFuso, listarEventos, criarEvento, editarEvento, apagarEvento, marcarFeito, idValido } from "./agenda.ts";
 import { chatConfigurado, audioConfigurado, conversa, enviar, confirmar, limparConversa, lerCaixa } from "./chat.ts";
 import * as avisos from "./push.ts";
 import * as remedios from "./remedios.ts";
 import * as fn from "./funcoes.ts";
 import * as auth from "./auth.ts";
+import * as demo from "./demo.ts";
+import { apagarPessoa } from "./apagar.ts";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -150,9 +154,9 @@ function sessao(req: IncomingMessage): Sessao {
   return { usuario: u.id };
 }
 
-function redirecionar(res: ServerResponse, para: string, cookies: string[] = []) {
+function redirecionar(res: ServerResponse, para: string, cookies: string[] = [], status = 302) {
   cabecalhosBase(res);
-  res.writeHead(302, { Location: para, "Cache-Control": "no-store", ...(cookies.length ? { "Set-Cookie": cookies } : {}) });
+  res.writeHead(status, { Location: para, "Cache-Control": "no-store", ...(cookies.length ? { "Set-Cookie": cookies } : {}) });
   res.end();
 }
 
@@ -197,6 +201,7 @@ async function rotas(req: IncomingMessage, res: ServerResponse) {
 
   if ((metodo === "GET" || metodo === "HEAD") && ESTATICOS[caminho]) return estatico(res, ESTATICOS[caminho]);
   if (caminho === "/saude" && metodo === "GET") return json(res, 200, { ok: true });
+  if (caminho === "/modo" && metodo === "GET") return json(res, 200, { google: auth.loginConfigurado(), demo: demo.DEMO, demoHoras: demo.HORAS });
   const xff = PROXY ? String(req.headers["x-forwarded-for"] ?? "").split(",").at(-1)?.trim() : "";
   const ip = xff || String(req.socket.remoteAddress ?? "");
 
@@ -222,13 +227,33 @@ async function rotas(req: IncomingMessage, res: ServerResponse) {
       return redirecionar(res, "/#erro=" + (e instanceof auth.ErroLogin ? e.message : "falhou"), [limpar]);
     }
   }
+  // ----- demonstração: formulário da tela de entrar (POST, para robôs que seguem links não criarem visitantes) -----
+  if (caminho === "/demo/entrar" && metodo === "POST") {
+    try {
+      // Só da própria tela de entrar. Com Referrer-Policy no-referrer, o navegador manda "Origin: null" no formulário;
+      // por isso vale o Sec-Fetch-Site, quando vem.
+      const site = req.headers["sec-fetch-site"], origem = req.headers.origin;
+      const daqui = site ? site === "same-origin" : !origem || origem === `${SEGURO ? "https" : "http"}://${req.headers.host}`;
+      if (!daqui) throw new demo.ErroDemo("falhou");
+      limitar("demo:" + ip, 5);
+      const valor = await demo.entrar();
+      return redirecionar(res, "/", [cookieSessao(valor, demo.HORAS * 3600)], 303);
+    } catch (e) {
+      if (!(e instanceof demo.ErroDemo) && !(e instanceof ErroHttp && e.status === 429)) console.error("demo:", e);
+      const cod = e instanceof demo.ErroDemo ? "demo-" + e.message : e instanceof ErroHttp && e.status === 429 ? "devagar" : "falhou";
+      return redirecionar(res, "/#erro=" + cod, [], 303);
+    }
+  }
   if (!caminho.startsWith("/app/")) return json(res, 404, { erro: "nao-achei" });
 
   if (metodo !== "GET") conferirOrigem(req);
 
   if (caminho === "/app/sair" && metodo === "POST") {
     const valor = lerCookie(req);
-    if (valor) auth.fecharSessao(valor);
+    const u = valor ? auth.lerSessao(valor) : null;
+    // Visitante da demonstração não volta: sair já apaga tudo dele.
+    if (u && auth.ehDemo(u.id)) await apagarPessoa(u.id);
+    else if (valor) auth.fecharSessao(valor);
     return json(res, 200, { ok: true }, { "Set-Cookie": cookieSessao("", 0) });
   }
 
@@ -237,7 +262,9 @@ async function rotas(req: IncomingMessage, res: ServerResponse) {
 
   if (caminho === "/app/eu" && metodo === "GET") {
     const e = eu(s);
-    return json(res, 200, { nome: e.nome, email: e.email, chat: chatConfigurado(), audio: chatConfigurado() && audioConfigurado(), funcoes: fn.funcoes(e.id) });
+    const visitante = auth.ehDemo(e.id);
+    return json(res, 200, { nome: e.nome, email: visitante ? "" : e.email, demo: visitante, demoHoras: demo.HORAS,
+      chat: chatConfigurado(), audio: chatConfigurado() && audioConfigurado(), funcoes: fn.funcoes(e.id) });
   }
   if (caminho === "/app/funcoes" && metodo === "POST") {
     const e = await eu(s);
@@ -246,10 +273,7 @@ async function rotas(req: IncomingMessage, res: ServerResponse) {
   }
 
   if (caminho === "/app/desconectar" && metodo === "POST") {
-    const e = eu(s);
-    await auth.desconectar(e.id);
-    limparConversa(e.id, true); avisos.apagarTudo(e.id); remedios.apagarTudo(e.id); fn.apagarTudo(e.id);
-    esquecer(e.id);
+    await apagarPessoa(eu(s).id);
     return json(res, 200, { ok: true }, { "Set-Cookie": cookieSessao("", 0) });
   }
 
@@ -362,4 +386,4 @@ avisos.iniciarRodada();
 
 createServer((req, res) => {
   rotas(req, res).catch((e) => { if (!res.headersSent) erro(res, e); else res.end(); });
-}).listen(PORTA, HOST, () => console.log(`IAgenda em http://${HOST}:${PORTA} (site: ${auth.SITE}; login: ${auth.loginConfigurado() ? "ok" : "falta AGENDA_GOOGLE_CLIENT_ID e AGENDA_GOOGLE_CLIENT_SECRET"}; chat: ${chatConfigurado() ? "ligado" : "sem chave"}; áudio: ${audioConfigurado() ? "ligado" : "desligado"})`));
+}).listen(PORTA, HOST, () => console.log(`IAgenda em http://${HOST}:${PORTA} (site: ${auth.SITE}; login: ${auth.loginConfigurado() ? "ok" : "falta AGENDA_GOOGLE_CLIENT_ID e AGENDA_GOOGLE_CLIENT_SECRET"}; demonstração: ${demo.DEMO ? "ligada" : "desligada"}; chat: ${chatConfigurado() ? "ligado" : "sem chave"}; áudio: ${audioConfigurado() ? "ligado" : "desligado"})`));

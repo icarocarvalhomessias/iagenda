@@ -29,6 +29,8 @@ const filhos = [
       AGENDA_DADOS: DADOS, AGENDA_PUSH_TESTE: "1",
       AGENDA_WHISPER: join(AQUI, "whisper-falso.ts"),
       AGENDA_CHAT_DIA: "100",
+      // Modo demonstração junto com o login: "Experimentar sem conta" na tela de entrar.
+      AGENDA_DEMO: "1",
     },
   }),
 ];

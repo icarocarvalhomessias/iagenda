@@ -15,6 +15,7 @@ Projeto pessoal de Icaro Carvalho. Hoje roda para um grupo pequeno de convidados
 - **Avisos por push** (Web Push): "hoje" de manhã, "amanhã" à noite, 1 hora antes de cada evento, remédios no horário e remédio acabando.
 - **Funções que cada pessoa liga ou desliga** (Compromissos, Contas, Remédios): desligada, some da página, do chat e dos avisos.
 - PWA instalável no celular.
+- **Modo demonstração** (opcional): "Experimentar sem conta" abre uma agenda de exemplo, guardada no próprio servidor, para quem não tem convite conhecer a IAgenda sem entregar a conta Google.
 
 ## Segurança
 
@@ -49,6 +50,9 @@ O chat mexe em dados reais de outras pessoas, então boa parte do código é sob
 | `remedios.ts` | Remédios, estoque, doses e relatório |
 | `push.ts` | Web Push e a rodada de avisos a cada 5 minutos |
 | `funcoes.ts` | Funções ligadas e desligadas por pessoa |
+| `demo.ts` | Modo demonstração: visitante sem conta, dados de exemplo e limpeza |
+| `calendario-local.ts` | Agenda guardada no SQLite que responde como o Google Calendar (usada pela demonstração) |
+| `apagar.ts` | Apagar tudo de uma pessoa (desconectar, `admin.ts apagar`, visitante que saiu) |
 | `banco.ts` | SQLite |
 | `config.ts` | Leitura dos segredos (variável, arquivo ou credencial do systemd) |
 | `publico/` | A página (agenda, chat, remédios) e a política de privacidade |
@@ -65,7 +69,16 @@ npm install
 npm run teste
 ```
 
-Depois abra <http://127.0.0.1:8091> (use `127.0.0.1`, não `localhost`) e clique em "Entrar com Google". A tela de login falsa deixa escolher cada caso: a pessoa convidada, alguém sem convite, quem desmarca a permissão da agenda e quem cancela.
+Depois abra <http://127.0.0.1:8091> (use `127.0.0.1`, não `localhost`) e clique em "Entrar com Google". A tela de login falsa deixa escolher cada caso: a pessoa convidada, alguém sem convite, quem desmarca a permissão da agenda e quem cancela. "Experimentar sem conta" abre o modo demonstração.
+
+## Modo demonstração
+
+Com `AGENDA_DEMO=1`, a tela de entrar ganha o botão **Experimentar sem conta**. Cada visitante recebe uma agenda só dele, com contas (uma atrasada, uma vencendo hoje, as do mês passado pagas), compromissos (um convite de outra pessoa, uma série semanal, uma viagem de vários dias) e dois remédios com a última semana de check-in, tudo com datas em volta de hoje.
+
+- Nada vai para o Google: a agenda do visitante fica no SQLite (`calendario-local.ts`), que responde como a API do Google Calendar. Por isso a página, o chat e os avisos usam exatamente o mesmo código de quem entra com Google.
+- O visitante dura `AGENDA_DEMO_HORAS` (24 h) e é apagado ao sair. No máximo `AGENDA_DEMO_MAX` visitantes ao mesmo tempo, e 5 entradas por minuto por IP.
+- O chat usa a chave da Anthropic, se houver, com limite próprio: `AGENDA_DEMO_CHAT_DIA` mensagens por visitante e `AGENDA_DEMO_CHAT_TOTAL` por dia somando todos (o teto de gasto da demonstração). Sem chave, a demonstração funciona sem o chat.
+- Pode rodar junto com o login do Google (convidados entram com Google, o resto experimenta) ou sozinha: sem `AGENDA_GOOGLE_CLIENT_ID`, só aparece o botão da demonstração.
 
 ## Hospedar com Docker
 
@@ -121,6 +134,10 @@ Os segredos (marcados com 🔑) aceitam três formas: o valor direto (`NOME=...`
 | `AGENDA_ANTHROPIC_CHAVE` 🔑 | `ANTHROPIC_API_KEY` | Chave da API da Anthropic (`anthropic-chave`). Sem ela, o chat fica desligado |
 | `AGENDA_MODELO`, `AGENDA_ESFORCO` | `claude-opus-5-5`, `low` | Modelo e esforço do chat |
 | `AGENDA_CHAT_DIA` | `100` | Mensagens por pessoa por dia |
+| `AGENDA_DEMO` | `0` | `1` liga o modo demonstração ("Experimentar sem conta") |
+| `AGENDA_DEMO_HORAS` | `24` | Quanto tempo dura cada visitante |
+| `AGENDA_DEMO_MAX` | `500` | Visitantes ao mesmo tempo |
+| `AGENDA_DEMO_CHAT_DIA`, `AGENDA_DEMO_CHAT_TOTAL` | `15`, `300` | Mensagens do chat por visitante e por dia somando todos os visitantes |
 | `AGENDA_WHISPER`, `AGENDA_WHISPER_MODELO` | `/usr/local/bin/whisper-cli` | whisper.cpp e o modelo, para o áudio do chat |
 | `AGENDA_DADOS` | `./dados` | Pasta do SQLite e das chaves dos avisos (geradas na primeira vez) |
 | `AGENDA_INSEGURO` | pelo `AGENDA_SITE` | `1` força o cookie sem `Secure`; `0` força com |
