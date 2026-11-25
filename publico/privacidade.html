@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IAgenda · Política de privacidade</title>
+<style>
+  body { font: 16px/1.6 system-ui, -apple-system, "Segoe UI", sans-serif; background: #f7f5ef; color: #22261f; margin: 0; }
+  main { max-width: 720px; margin: 0 auto; padding: 32px 20px 64px; }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  h2 { font-size: 19px; margin: 32px 0 8px; }
+  .data { color: #6b7066; margin: 0 0 24px; }
+  li { margin: 4px 0; }
+  code { background: #ebe8de; padding: 1px 5px; border-radius: 4px; font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+<h1>Política de privacidade da IAgenda</h1>
+<p class="data">Em vigor desde 2026-11-22. Atualizada em 2026-11-23 (remédios).</p>
+
+<p>A IAgenda é um projeto pessoal de <strong>Icaro Carvalho</strong>. Ela mostra a sua agenda Google e deixa você criar, mudar e apagar compromissos por um chat. Hoje é usada só por pessoas convidadas.</p>
+
+<h2>O que pedimos à sua conta Google</h2>
+<ul>
+  <li><strong>Seu nome, e-mail e foto</strong> (<code>openid</code>, <code>email</code>, <code>profile</code>): para você entrar e para sabermos que o convite é seu.</li>
+  <li><strong>Ver e editar os eventos da sua agenda</strong> (<code>calendar.events</code>): para mostrar os seus compromissos e para o chat criar, mudar, apagar e marcar como feitos os eventos que você pedir.</li>
+</ul>
+<p>Não pedimos acesso ao seu Gmail, Drive, contatos nem a nenhum outro serviço Google.</p>
+
+<h2>O que guardamos</h2>
+<ul>
+  <li>Seu nome e e-mail, para o login.</li>
+  <li>A autorização do Google (o token de acesso), guardada criptografada no nosso servidor, para a agenda funcionar sem pedir permissão toda vez.</li>
+  <li>As mensagens do chat, para a conversa continuar de onde parou.</li>
+  <li>Se você usar a parte de remédios: o nome de cada remédio, a dose e os horários que você informou, o estoque, as compras, as doses marcadas como tomadas e os dados lidos da caixa (como concentração, laboratório, lote e validade). É um dado de saúde: fica só no nosso servidor, separado por pessoa, e nunca vai para a sua agenda Google. A foto da caixa é lida e descartada, não fica guardada.</li>
+  <li>Se você ligar os avisos, o endereço de notificação do seu navegador.</li>
+</ul>
+<p>Os seus eventos <strong>não são copiados</strong> para o nosso banco: eles são lidos da sua agenda Google na hora em que você abre a página ou conversa no chat.</p>
+
+<h2>Como os dados são usados</h2>
+<ul>
+  <li>Só para fazer o que o serviço promete: mostrar a sua agenda, responder no chat, mudar os eventos que você pedir e mandar os avisos que você ligou.</li>
+  <li>Para responder no chat, o texto da sua mensagem (e a foto, se mandar) e os eventos ou remédios necessários para a resposta vão para um provedor de inteligência artificial (por exemplo, Anthropic ou Google), pela API, que processa o pedido e devolve a resposta. Esses dados não são usados para treinar modelos de IA de uso geral, nem por nós nem a nosso pedido.</li>
+  <li>Não vendemos dados, não usamos para propaganda e não repassamos a ninguém além do necessário para o serviço funcionar.</li>
+  <li>Ninguém lê os seus eventos ou mensagens, a não ser que você peça (por exemplo, para resolver um problema), que seja preciso por segurança ou que a lei obrigue.</li>
+</ul>
+<p>O uso e a transferência de informações recebidas das APIs do Google seguem a <a href="https://developers.google.com/terms/api-services-user-data-policy">Política de Dados do Usuário dos Serviços de API do Google</a>, incluindo os requisitos de Uso Limitado.</p>
+
+<h2>Onde ficam e por quanto tempo</h2>
+<ul>
+  <li>Num servidor (VPS) contratado pelo responsável pelo serviço, com acesso restrito.</li>
+  <li>As mensagens do chat ficam enquanto a sua conta existir, ou até você apagá-las.</li>
+  <li>Os remédios ficam enquanto a sua conta existir, ou até você apagá-los na própria página.</li>
+  <li>Ao sair e desconectar o Google, apagamos a autorização, as mensagens, os remédios e os avisos em até 7 dias.</li>
+</ul>
+
+<h2>Seus direitos (LGPD)</h2>
+<p>Você pode pedir a qualquer momento para ver, corrigir ou apagar os seus dados, e pode tirar a permissão da agenda pelo próprio Google, em <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>. Para qualquer pedido, escreva para <a href="mailto:icarusdev12@gmail.com">icarusdev12@gmail.com</a>.</p>
+
+<h2>Mudanças</h2>
+<p>Se esta política mudar, a data no topo muda junto, e avisamos pelo próprio serviço antes de valer.</p>
+</main>
+</body>
+</html>

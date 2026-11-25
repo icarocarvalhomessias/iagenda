@@ -1,0 +1,9 @@
+{
+  "name": "agenda-web",
+  "private": true,
+  "type": "module",
+  "description": "IAgenda: agenda Google com chat de IA, contas a pagar, remédios e avisos por push",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.12.0"
+  }
+}

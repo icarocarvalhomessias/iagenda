@@ -1,0 +1,50 @@
+# Exemplo de serviço systemd. Ajuste o domínio, os caminhos e o usuário ao seu servidor.
+[Unit]
+Description=agenda-web (IAgenda para convidados)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=agenda-web
+Group=agenda-web
+WorkingDirectory=/opt/agenda-web
+ExecStart=/usr/local/bin/node /opt/agenda-web/servidor.ts
+Restart=always
+RestartSec=5
+Environment=TZ=America/Sao_Paulo
+# Escuta só em rede interna; o proxy reverso (Caddy, nginx) põe o HTTPS na frente.
+Environment=AGENDA_HOST=127.0.0.1
+Environment=AGENDA_PORTA=8091
+# Serviço de login (Google OAuth, convites, JWT) que entrega o access token do Google de cada pessoa.
+Environment=AGENDA_CONTAS=https://contas.example.com
+Environment=AGENDA_SITE=https://agenda.example.com
+# O segredo que o serviço de login pede em /api/auth/google/acesso. O systemd lê como root e entrega só a este
+# processo (em $CREDENTIALS_DIRECTORY); o arquivo de origem continua só do root.
+LoadCredential=servico-segredo:/etc/agenda-web/servico-segredo
+# Chave da API da Anthropic do chat. Sem ela, o chat fica desligado e a agenda segue.
+LoadCredential=anthropic-chave:/etc/agenda-web/anthropic-chave
+# Modelo e esforço do chat (chat.ts). Para baratear: AGENDA_MODELO=claude-haiku-5-5.
+Environment=AGENDA_MODELO=claude-opus-5-5
+Environment=AGENDA_ESFORCO=low
+Environment=AGENDA_CHAT_DIA=100
+StateDirectory=agenda-web
+StateDirectoryMode=0700
+# A conversa do chat, os remédios e os avisos ficam em $STATE_DIRECTORY/agenda.db (SQLite).
+# Sem sudo e sem acesso ao resto do servidor: só lê o próprio código e fala com o login e o Google.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+InaccessiblePaths=/home /root /var/backups
+
+[Install]
+WantedBy=multi-user.target

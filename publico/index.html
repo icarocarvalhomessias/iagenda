@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>IAgenda</title>
+<meta name="theme-color" content="#0f6b57">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icone.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/icone-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="IAgenda">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Atkinson+Hyperlegible:wght@400;700&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="stylesheet" href="/app.css">
+<script src="/app.js" defer></script>
+</head>
+<body>
+
+<!-- Entrar -->
+<main id="telaEntrar" class="entrar" hidden>
+  <div class="entrar-card">
+    <img src="/icone.svg" alt="" width="56" height="56">
+    <h1>IAgenda</h1>
+    <p>Sua agenda do Google, com lembretes e um jeito simples de marcar o que já fez.</p>
+    <p id="entrarErro" class="alert red" role="alert" hidden></p>
+    <a id="entrarBtn" class="google-btn" href="/api/auth/google/start">
+      <svg viewBox="0 0 48 48" width="20" height="20" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.6l6.7-6.7C35.6 2.4 30.2 0 24 0 14.6 0 6.6 5.4 2.6 13.3l7.8 6C12.3 13.6 17.6 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.6c0-1.6-.1-3.1-.4-4.6H24v9h12.4c-.5 2.9-2.2 5.3-4.6 6.9l7.4 5.8c4.3-4 6.9-9.9 6.9-17.1z"/><path fill="#FBBC05" d="M10.4 28.7c-.5-1.4-.8-3-.8-4.7s.3-3.2.8-4.7l-7.8-6C.9 16.6 0 20.2 0 24s.9 7.4 2.6 10.7l7.8-6z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.8-5.8l-7.4-5.8c-2.1 1.4-4.8 2.3-8.4 2.3-6.4 0-11.7-4.1-13.6-9.8l-7.8 6C6.6 42.6 14.6 48 24 48z"/></svg>
+      Entrar com Google
+    </a>
+    <p class="note">Só para convidados. Ao entrar, você deixa a IAgenda ver e mudar os eventos da sua agenda Google. <a href="/privacidade">Privacidade</a></p>
+  </div>
+</main>
+
+<!-- Agenda -->
+<div id="telaAgenda" hidden>
+  <!-- Cabeçalho: no celular, barra do app (nome, novo, conta) e, embaixo, a navegação do mês; no computador, uma linha só. -->
+  <header class="bar-top">
+    <span class="brand">IAgenda</span>
+    <div class="bar-mes">
+      <button class="iconbtn" id="antBtn" type="button" aria-label="Mês anterior">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7"/></svg>
+      </button>
+      <h2 id="mesNome" aria-live="polite"></h2>
+      <button class="iconbtn" id="proxBtn" type="button" aria-label="Próximo mês">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5l7 7-7 7"/></svg>
+      </button>
+      <button class="pillbtn hoje" id="hojeBtn" type="button">Hoje</button>
+    </div>
+    <div class="bar-acoes">
+      <span id="carregando" class="note" hidden>atualizando…</span>
+      <button class="novo" id="novoBtn" type="button" aria-label="Novo compromisso ou conta">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span class="rotulo">Novo</span>
+      </button>
+      <details class="menu">
+        <summary class="avatar" aria-label="Conta e ajustes deste aparelho"><span id="inicial">?</span></summary>
+        <div class="menu-pop">
+          <div class="menu-quem">
+            <strong id="euNome"></strong>
+            <span id="euEmail" class="note"></span>
+          </div>
+          <div class="menu-sec">Funções</div>
+          <button type="button" class="menu-item funcao" role="switch" aria-checked="true" data-funcao="compromissos">
+            <span class="mi-ic" aria-hidden="true">📅</span><span class="mi-nome">Compromissos</span><span class="chave" aria-hidden="true"></span>
+          </button>
+          <button type="button" class="menu-item funcao" role="switch" aria-checked="true" data-funcao="contas">
+            <span class="mi-ic" aria-hidden="true">💸</span><span class="mi-nome">Contas</span><span class="chave" aria-hidden="true"></span>
+          </button>
+          <button type="button" class="menu-item funcao" role="switch" aria-checked="false" data-funcao="remedios">
+            <span class="mi-ic" aria-hidden="true">💊</span><span class="mi-nome">Remédios</span><span class="chave" aria-hidden="true"></span>
+          </button>
+          <div class="menu-sec">Neste aparelho</div>
+          <button type="button" class="menu-item" id="avisosBtn" aria-pressed="false" hidden>
+            <span class="mi-ic" aria-hidden="true">🔔</span><span class="mi-nome">Avisos</span><small class="mi-estado" id="avisosEstado"></small>
+          </button>
+          <button type="button" class="menu-item" id="midiaBtn" aria-pressed="false" hidden>
+            <span class="mi-ic" aria-hidden="true">🎙️</span><span class="mi-nome">Microfone e câmera</span><small class="mi-estado" id="midiaEstado"></small>
+          </button>
+          <div class="menu-sec">Conta</div>
+          <a class="menu-item" href="/privacidade"><span class="mi-ic" aria-hidden="true">🔒</span><span class="mi-nome">Privacidade</span></a>
+          <button type="button" class="menu-item" id="sairBtn"><span class="mi-ic" aria-hidden="true">↩</span><span class="mi-nome">Sair</span></button>
+          <button type="button" class="menu-item perigo" id="desconectarBtn"><span class="mi-ic" aria-hidden="true">⏏</span><span class="mi-nome">Sair e desconectar o Google</span></button>
+        </div>
+      </details>
+    </div>
+  </header>
+
+  <p id="aviso" class="alert amber faixa" role="status" hidden></p>
+
+  <div class="layout">
+    <div class="principal">
+      <section class="cal" aria-label="Mês">
+        <div class="cal-grid" id="dows"></div>
+        <div class="cal-grid" id="grade"></div>
+      </section>
+      <section class="card contas-mes" aria-labelledby="contasMesTit">
+        <div class="contas-topo">
+          <h2 id="contasMesTit">Contas do mês</h2>
+          <button type="button" class="pillbtn" id="novaContaBtn">+ Nova conta</button>
+        </div>
+        <div id="contasMes"></div>
+      </section>
+    </div>
+    <aside class="side">
+      <div class="card" id="cardDia">
+        <h2 class="dia-tit" id="diaTitulo"></h2>
+        <div id="diaLista"></div>
+        <button type="button" class="pillbtn" id="novoNoDia">+ Novo neste dia</button>
+      </div>
+      <div class="card remedios" id="cardRemedios" hidden>
+        <div class="contas-topo">
+          <h2>💊 Remédios de hoje</h2>
+          <button type="button" class="pillbtn" id="remNovoBtn">+ Remédio</button>
+        </div>
+        <div id="remAlertas"></div>
+        <div id="remHoje"></div>
+        <div class="rem-rodape">
+          <button type="button" class="pillbtn" id="remListaBtn">Lista e estoque</button>
+          <button type="button" class="pillbtn" id="remRelBtn">Relatório</button>
+        </div>
+      </div>
+      <div class="card" id="cardContas">
+        <div class="seg vis-seg" role="tablist" aria-label="Contas">
+          <button type="button" role="tab" id="abaPagar" aria-selected="true" aria-controls="painelPagar">A pagar</button>
+          <button type="button" role="tab" id="abaCategoria" aria-selected="false" aria-controls="painelCategoria">Por categoria</button>
+        </div>
+        <div id="painelPagar" role="tabpanel" aria-labelledby="abaPagar"></div>
+        <div id="painelCategoria" role="tabpanel" aria-labelledby="abaCategoria" hidden></div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<!-- Chat (em todas as telas logadas) -->
+<button type="button" id="chatBtn" class="chat-btn" aria-label="Conversar com a Icarus" aria-expanded="false" aria-controls="chat" hidden>
+  <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path fill="currentColor" d="M4 4h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-5 4v-4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/></svg>
+  <span>Icarus</span>
+</button>
+<aside id="chat" class="chat" aria-label="Chat com a Icarus" hidden>
+  <div class="chat-alca" aria-hidden="true"></div>
+  <header class="chat-topo">
+    <strong>Icarus</strong>
+    <span class="note">mexe na sua agenda por você</span>
+    <span class="spacer"></span>
+    <button type="button" class="chat-ic" id="chatLimpar" title="Limpar conversa" aria-label="Limpar conversa">🗑</button>
+    <button type="button" class="chat-ic" id="chatFechar" aria-label="Fechar o chat">✕</button>
+  </header>
+  <div id="chatLista" class="chat-lista" aria-live="polite"></div>
+  <div id="chatPendente" class="chat-pendente" hidden>
+    <strong>Confirma?</strong>
+    <ul id="chatPendItens"></ul>
+    <div class="botoes">
+      <button type="button" class="pillbtn" id="chatNao">Cancelar</button>
+      <button type="button" class="pillbtn cheio perigo" id="chatSim">Confirmar</button>
+    </div>
+  </div>
+  <div id="chatFotoPrevia" class="chat-previa" hidden>
+    <img id="chatFotoImg" alt="Foto para enviar">
+    <button type="button" class="chat-ic" id="chatFotoTirar" aria-label="Tirar a foto">✕</button>
+  </div>
+  <form id="chatForm" class="chat-form">
+    <input type="file" id="chatFoto" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" hidden>
+    <button type="button" class="icone" id="chatFotoBtn" aria-label="Mandar foto (boleto, conta, convite)" title="Mandar foto">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h3.5l2-3h5l2 3H20v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
+    </button>
+    <textarea id="chatTexto" rows="1" maxlength="600" placeholder="Ex.: luz de 180 reais vence dia 10" aria-label="Mensagem" enterkeyhint="send"></textarea>
+    <div id="chatGravando" class="gravando" role="status" hidden>
+      <span class="ponto" aria-hidden="true"></span><span class="tempo">0:00</span>
+      <button type="button" class="pillbtn" id="chatCancelarAudio">Cancelar</button>
+    </div>
+    <button type="button" class="icone" id="chatMic" aria-label="Gravar áudio" title="Gravar áudio">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+    </button>
+    <button type="submit" class="icone enviar" id="chatEnviar" aria-label="Enviar" title="Enviar" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12 20 4l-4 16-4-6z"/><path d="M12 14 20 4"/></svg>
+    </button>
+  </form>
+  <p id="chatRodape" class="chat-rodape note"></p>
+</aside>
+
+<!-- Criar / editar -->
+<dialog id="dlgEvento">
+  <form id="formEvento" method="dialog">
+    <h2 id="dlgTitulo">Novo evento</h2>
+    <div class="seg tipo-seg" role="radiogroup" aria-label="Tipo">
+      <label id="tipoEventoLin"><input type="radio" name="tipo" value="evento" checked> Compromisso</label>
+      <label id="tipoContaLin"><input type="radio" name="tipo" value="conta"> Conta a pagar</label>
+    </div>
+    <label>Nome
+      <input name="titulo" required maxlength="200" autocomplete="off" placeholder="Ex.: pagar a luz">
+    </label>
+    <div class="linha" id="contaCampos" hidden>
+      <label>Valor (R$) <input name="valor" inputmode="decimal" autocomplete="off" placeholder="0,00"></label>
+      <label>Categoria <select name="categoria"></select></label>
+    </div>
+    <div class="linha">
+      <label><span id="rotuloData">Dia</span> <input name="data" type="date" required></label>
+      <label id="dataFimLin">Até <input name="dataFim" type="date"></label>
+    </div>
+    <label class="check-lin" id="diaTodoLin"><input name="diaInteiro" type="checkbox" checked> O dia todo</label>
+    <div class="linha" id="horas">
+      <label>Começa <input name="hora" type="time"></label>
+      <label>Termina <input name="horaFim" type="time"></label>
+    </div>
+    <label id="repetirLin">Repetir
+      <select name="repetir">
+        <option value="nao">Não repete</option>
+        <option value="diario">Todo dia</option>
+        <option value="semanal">Toda semana</option>
+        <option value="mensal">Todo mês</option>
+        <option value="anual">Todo ano</option>
+      </select>
+    </label>
+    <label class="check-lin" id="todasLin" hidden><input name="todas" type="checkbox"> Mudar o nome, o local e a descrição em todas as repetições</label>
+    <label>Local <input name="local" maxlength="300" autocomplete="off"></label>
+    <label>Descrição <textarea name="descricao" rows="3" maxlength="2000"></textarea></label>
+    <p class="note" id="dlgNota">Você recebe o lembrete pelo app Google Agenda: na véspera às 9h (dia todo) ou 1 dia e 1 hora antes.</p>
+    <p id="dlgErro" class="alert red" role="alert" hidden></p>
+    <div class="botoes">
+      <button type="button" class="pillbtn" id="dlgCancelar">Cancelar</button>
+      <button type="submit" class="pillbtn cheio" id="dlgSalvar">Salvar</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Apagar -->
+<dialog id="dlgApagar">
+  <form method="dialog">
+    <h2>Apagar da agenda?</h2>
+    <p id="apagarQual" class="apagar-qual"></p>
+    <p id="apagarNota" class="note"></p>
+    <p id="apagarErro" class="alert red" role="alert" hidden></p>
+    <div class="botoes">
+      <button type="button" class="pillbtn" id="apagarCancelar">Cancelar</button>
+      <button type="button" class="pillbtn perigo" id="apagarTodas" hidden>Todas as repetições</button>
+      <button type="button" class="pillbtn cheio perigo" id="apagarUm">Apagar</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Avisos -->
+<dialog id="dlgAvisos">
+  <form method="dialog">
+    <h2 id="avisosTit">Avisos neste aparelho</h2>
+    <p id="avisosTexto"></p>
+    <p id="avisosErro" class="alert red" role="alert" hidden></p>
+    <div class="botoes">
+      <button type="button" class="pillbtn" id="avisosFechar">Fechar</button>
+      <button type="button" class="pillbtn cheio" id="avisosAcao">Ligar avisos</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Microfone e câmera -->
+<dialog id="dlgMidia">
+  <form method="dialog">
+    <h2>Microfone e câmera</h2>
+    <p id="midiaTexto"></p>
+    <ul class="midia-estado">
+      <li>Microfone: <strong id="midiaMic">…</strong></li>
+      <li>Câmera: <strong id="midiaCam">…</strong></li>
+    </ul>
+    <p id="midiaErro" class="alert red" role="alert" hidden></p>
+    <div class="botoes">
+      <button type="button" class="pillbtn" id="midiaFechar">Fechar</button>
+      <button type="button" class="pillbtn cheio" id="midiaPermitir">Permitir</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Remédio: cadastrar / editar -->
+<dialog id="dlgRemedio">
+  <form id="formRemedio" method="dialog">
+    <h2 id="remDlgTitulo">Novo remédio</h2>
+    <input type="file" id="remFoto" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" capture="environment" hidden>
+    <button type="button" class="pillbtn foto-caixa" id="remFotoBtn">📷 Ler da caixa</button>
+    <p class="note" id="remFotoNota">Tire uma foto da caixa: eu preencho o nome, a quantidade e os dados da caixa. A foto não fica guardada.</p>
+    <label>Nome
+      <input name="nome" required maxlength="80" autocomplete="off" placeholder="Ex.: Losartana 50 mg">
+    </label>
+    <div class="linha">
+      <label>Quanto por vez <input name="dose" inputmode="decimal" autocomplete="off" required value="1"></label>
+      <label>Unidade
+        <input name="unidade" list="remUnidades" maxlength="30" autocomplete="off" value="comprimido">
+        <datalist id="remUnidades"><option value="comprimido"><option value="cápsula"><option value="gota"><option value="ml"><option value="sachê"><option value="aplicação"></datalist>
+      </label>
+    </div>
+    <fieldset class="horarios">
+      <legend>Quando toma</legend>
+      <label class="check-lin"><input type="checkbox" name="h_manha"> Manhã <small class="note">8h</small></label>
+      <label class="check-lin"><input type="checkbox" name="h_tarde"> Tarde <small class="note">14h</small></label>
+      <label class="check-lin"><input type="checkbox" name="h_noite"> Noite <small class="note">20h</small></label>
+      <label>Horários certos <input name="h_outros" autocomplete="off" placeholder="Ex.: 07:00, 15:00, 23:00"></label>
+    </fieldset>
+    <div class="linha">
+      <label>Unidades por caixa <input name="porCaixa" inputmode="numeric" autocomplete="off" placeholder="Ex.: 28"></label>
+    </div>
+    <div class="linha" id="remEstoqueLin">
+      <label>Caixas fechadas <input name="caixas" inputmode="decimal" autocomplete="off" placeholder="0"></label>
+      <label>Unidades soltas <input name="estoque" inputmode="decimal" autocomplete="off" placeholder="0"></label>
+    </div>
+    <div class="linha">
+      <label>Começou <input name="inicio" type="date"></label>
+      <label>Até <small class="note">(se tiver fim)</small> <input name="fim" type="date"></label>
+    </div>
+    <label>Observação <input name="obs" maxlength="200" autocomplete="off" placeholder="Ex.: em jejum"></label>
+    <details class="caixa-det" id="remCaixaDet">
+      <summary>Dados da caixa</summary>
+      <div id="remCaixaCampos" class="caixa-campos"></div>
+    </details>
+    <p id="remErro" class="alert red" role="alert" hidden></p>
+    <div class="botoes">
+      <button type="button" class="pillbtn" id="remCancelar">Cancelar</button>
+      <button type="submit" class="pillbtn cheio" id="remSalvar">Salvar</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Remédios: lista e estoque -->
+<dialog id="dlgRemLista" class="largo">
+  <form method="dialog">
+    <h2>Remédios e estoque</h2>
+    <div id="remLista"></div>
+    <div class="botoes">
+      <button type="button" class="pillbtn" id="remListaNovo">+ Remédio</button>
+      <button type="button" class="pillbtn cheio" id="remListaFechar">Fechar</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Remédio: comprei / contei -->
+<dialog id="dlgRemEstoque">
+  <form id="formRemEstoque" method="dialog">
+    <h2 id="remEstTitulo">Comprei</h2>
+    <p id="remEstNota" class="note"></p>
+    <div class="linha">
+      <label>Caixas <input name="caixas" inputmode="decimal" autocomplete="off" placeholder="0"></label>
+      <label>Unidades <input name="estoque" inputmode="decimal" autocomplete="off" placeholder="0"></label>
+    </div>
+    <p id="remEstErro" class="alert red" role="alert" hidden></p>
+    <div class="botoes">
+      <button type="button" class="pillbtn" id="remEstCancelar">Cancelar</button>
+      <button type="submit" class="pillbtn cheio">Salvar</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Remédios: relatório -->
+<dialog id="dlgRemRel" class="largo">
+  <form method="dialog">
+    <h2>Relatório dos remédios</h2>
+    <div class="seg vis-seg" role="tablist" aria-label="Período">
+      <button type="button" role="tab" data-dias="7" aria-selected="false">7 dias</button>
+      <button type="button" role="tab" data-dias="30" aria-selected="true">30 dias</button>
+      <button type="button" role="tab" data-dias="90" aria-selected="false">90 dias</button>
+    </div>
+    <div id="remRel"></div>
+    <div class="botoes">
+      <button type="button" class="pillbtn cheio" id="remRelFechar">Fechar</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Apagar remédio -->
+<dialog id="dlgRemApagar">
+  <form method="dialog">
+    <h2>Apagar o remédio?</h2>
+    <p id="remApagarQual" class="apagar-qual"></p>
+    <p class="note">Some da lista junto com o estoque e todo o histórico de doses. Se só parou de tomar, prefira editar e pôr a data de fim: o histórico fica.</p>
+    <div class="botoes">
+      <button type="button" class="pillbtn" id="remApagarCancelar">Cancelar</button>
+      <button type="button" class="pillbtn cheio perigo" id="remApagarSim">Apagar</button>
+    </div>
+  </form>
+</dialog>
+
+<!-- Desconectar -->
+<dialog id="dlgDesconectar">
+  <form method="dialog">
+    <h2>Desconectar o Google?</h2>
+    <p>A IAgenda perde o acesso à sua agenda e a sua conta aqui é apagada. Os eventos continuam no Google, do jeito que estão.</p>
+    <div class="botoes">
+      <button type="button" class="pillbtn" id="descCancelar">Cancelar</button>
+      <button type="button" class="pillbtn cheio perigo" id="descConfirmar">Desconectar</button>
+    </div>
+  </form>
+</dialog>
+
+</body>
+</html>
